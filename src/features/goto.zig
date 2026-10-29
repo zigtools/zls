@@ -117,7 +117,7 @@ fn gotoDefinitionGlobal(
 
     const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const is_escaped_identifier = handle.tree.source[handle.tree.tokenStart(name_token)] == '@';
+    const is_escaped_identifier = handle.tree.source[name_token.byteOffset(&handle.tree)] == '@';
 
     if (!is_escaped_identifier) {
         if (std.mem.eql(u8, name, "_")) return null;
@@ -140,9 +140,9 @@ fn gotoDefinitionStructInit(
 
     if (kind == .declaration) return null;
 
-    const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
-    if (token + 1 >= handle.tree.tokens.len) return null;
-    if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
+    const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{.@"."}, &handle.tree) orelse return null;
+    if (@backingInt(token.add(1)) >= handle.tree.tokens.len()) return null;
+    if (token.add(1).tag(&handle.tree) != .@"{") return null;
 
     const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
     const token_handle = resolved_type.typeDefinitionToken() orelse return null;

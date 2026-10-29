@@ -30,6 +30,8 @@ pub const String = StringPool.String;
 const ErrorMsg = @import("error_msg.zig").ErrorMsg;
 const SegmentedList = @import("segmented_list.zig").SegmentedList;
 
+const Ast = @import("zirp").Ast;
+
 pub const Key = union(enum) {
     simple_type: SimpleType,
     simple_value: SimpleValue,
@@ -948,7 +950,7 @@ pub const NamespaceIndex = enum(u32) {
 
 pub const Decl = struct {
     name: String,
-    node_idx: std.zig.Ast.Node.Index,
+    node_idx: Ast.Node.Index,
     /// this stores both the type and the value
     index: InternPool.Index,
     alignment: u16,

@@ -444,6 +444,9 @@ fn createZLSModule(
         .target = options.target,
         .optimize = options.optimize,
     }).module("lsp");
+    const zirp_module = b.dependency("zirp", .{
+        .optimize = options.optimize,
+    }).module("zirp");
     const tracy_module = createTracyModule(b, .{
         .target = options.target,
         .optimize = options.optimize,
@@ -458,6 +461,7 @@ fn createZLSModule(
         .imports = &.{
             .{ .name = "diffz", .module = diffz_module },
             .{ .name = "lsp", .module = lsp_module },
+            .{ .name = "zirp", .module = zirp_module },
             .{ .name = "tracy", .module = tracy_module },
             .{ .name = "build_options", .module = options.build_options },
             .{ .name = "version_data", .module = options.version_data },

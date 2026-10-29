@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/inlayHint`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_inlayHint)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
@@ -211,8 +211,8 @@ const Builder = struct {
 
     fn appendParameterHint(
         self: *Builder,
-        node_tag: Ast.Node.Tag,
-        token_index: Ast.TokenIndex,
+        node_tag: Ast.SyntaxTag,
+        token_index: Ast.Token.Index,
         label: []const u8,
         tooltip_text: []const u8,
         tooltip_noalias: bool,
@@ -235,10 +235,10 @@ const Builder = struct {
         };
 
         try self.hints.append(self.arena, .{
-            .index = if (node_tag == .multiline_string_literal)
-                offsets.tokenToLoc(&self.handle.tree, token_index - 1).end
+            .index = if (node_tag == .multiline_string_line)
+                offsets.tokenToLoc(&self.handle.tree, token_index.add(-1)).end
             else
-                self.handle.tree.tokenStart(token_index),
+                token_index.byteOffset(&self.handle.tree),
             .label = try self.arena.print("{s}:", .{label}),
             .kind = .Parameter,
             .tooltip = tooltip,
@@ -278,39 +278,41 @@ const Builder = struct {
 };
 
 /// writes parameter hints into `builder.hints`
-fn writeCallHint(
-    builder: *Builder,
-    /// The function call.
-    call: Ast.full.Call,
-) Analyser.Error!void {
+fn writeCallHint(builder: *Builder, call: Ast.Expr.Call) Analyser.Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = builder.handle;
+    const call_handle = builder.handle;
 
-    const ty = try builder.analyser.resolveTypeOfNode(.of(call.ast.fn_expr, handle)) orelse return;
+    // BRANCH_TODO remove call to `count`
+    const arg_count = call.args.iter(&call_handle.tree).count(&call_handle.tree);
+
+    if (arg_count == 0) return;
+    if (builder.config.inlay_hints_exclude_single_argument and arg_count == 1) return;
+
+    const ty = try builder.analyser.resolveTypeOfNode(.of(call.callee.idx, call_handle)) orelse return;
     const fn_ty = try builder.analyser.resolveFuncProtoOfCallable(ty) orelse return;
     const fn_info = fn_ty.data.function;
 
-    const has_self_param = call.ast.params.len + 1 == fn_info.parameters.len and
-        try builder.analyser.isInstanceCall(handle, call, fn_ty);
+    const has_self_param = arg_count + 1 == fn_info.parameters.len and
+        try builder.analyser.isInstanceCall(call_handle, call, fn_ty);
 
     const parameters = fn_info.parameters[@intFromBool(has_self_param)..];
-    const arguments = call.ast.params;
-    const min_len = @min(parameters.len, arguments.len);
-    for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
+    var arguments = call.args.iter(&call_handle.tree);
+    for (parameters) |param| {
+        const arg = arguments.next(&call_handle.tree) orelse break;
         const parameter_name = param.name orelse continue;
 
         if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) dont_skip: {
             const arg_token = if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
-                ast.lastToken(&handle.tree, arg)
+                ast.lastToken(&call_handle.tree, arg.idx)
             else if (builder.config.inlay_hints_hide_redundant_param_names)
-                handle.tree.nodeMainToken(arg)
+                arg.idx.mainToken(&call_handle.tree)
             else
                 unreachable;
 
-            if (handle.tree.tokenTag(arg_token) != .identifier) break :dont_skip;
-            const arg_token_name = offsets.identifierTokenToNameSlice(&handle.tree, arg_token);
+            if (arg_token.tag(&call_handle.tree) != .name) break :dont_skip;
+            const arg_token_name = offsets.identifierTokenToNameSlice(&call_handle.tree, arg_token);
             if (!std.mem.eql(u8, parameter_name, arg_token_name)) break :dont_skip;
 
             continue;
@@ -325,8 +327,8 @@ fn writeCallHint(
         );
 
         try builder.appendParameterHint(
-            handle.tree.nodeTag(arg),
-            handle.tree.firstToken(arg),
+            arg.idx.syntaxTag(&call_handle.tree),
+            arg.idx.firstToken(&call_handle.tree),
             parameter_name,
             tooltip,
             no_alias,
@@ -336,15 +338,21 @@ fn writeCallHint(
 }
 
 /// takes parameter nodes from the ast and function parameter names from `Builtin.parameters` and writes parameter hints into `builder.hints`
-fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, params: []const data.Builtin.Parameter) error{OutOfMemory}!void {
+fn writeBuiltinHint(
+    builder: *Builder,
+    builtin: Ast.Expr.Builtin,
+    params: []const data.Builtin.Parameter,
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = builder.handle;
     const tree = &handle.tree;
 
-    const len = @min(params.len, parameters.len);
-    for (params[0..len], parameters[0..len]) |param, parameter| {
+    var it = builtin.args.iter(tree);
+    for (params) |param| {
+        const parameter = it.next(tree) orelse break;
+
         var signature = param.signature;
         if (std.mem.eql(u8, signature, "...")) return;
 
@@ -364,8 +372,8 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, param
         const tooltip = if (colon_index) |i| signature[i + 1 ..] else "";
 
         try builder.appendParameterHint(
-            tree.nodeTag(parameter),
-            tree.firstToken(parameter),
+            parameter.idx.syntaxTag(tree),
+            parameter.idx.firstToken(tree),
             label,
             tooltip,
             is_noalias,
@@ -382,11 +390,11 @@ fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) Analyser.Error!?[]cons
     );
 }
 
-fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!?[]const u8 {
+fn typeStrOfToken(builder: *Builder, token: Ast.Token.Index) Analyser.Error!?[]const u8 {
     const things = try builder.analyser.lookupSymbolGlobal(
         builder.handle,
         offsets.tokenToSlice(&builder.handle.tree, token),
-        builder.handle.tree.tokenStart(token),
+        token.byteOffset(&builder.handle.tree),
     ) orelse return null;
     const resolved_type = try things.resolveType(builder.analyser) orelse return null;
     return try resolved_type.stringifyTypeOf(
@@ -396,7 +404,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!?[]co
 }
 
 /// Append a hint in the form `: hint`
-fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hint: []const u8) error{OutOfMemory}!void {
+fn appendTypeHintString(builder: *Builder, type_token_index: Ast.Token.Index, hint: []const u8) error{OutOfMemory}!void {
     const name = offsets.tokenToSlice(&builder.handle.tree, type_token_index);
     if (std.mem.eql(u8, name, "_")) {
         return;
@@ -410,44 +418,22 @@ fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hin
     });
 }
 
-fn inferAppendTypeStr(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!void {
+fn inferAppendTypeStr(builder: *Builder, token: Ast.Token.Index) Analyser.Error!void {
     const type_str = try typeStrOfToken(builder, token) orelse return;
     try appendTypeHintString(builder, token, type_str);
 }
 
-fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) Analyser.Error!void {
+fn writePayloadHint(builder: *Builder, payload: Ast.Payload) Analyser.Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const tree = &builder.handle.tree;
-    const full_for = ast.fullFor(tree, for_node).?;
-    var capture_token = full_for.payload_token;
-    for (full_for.ast.inputs) |_| {
-        if (capture_token + 1 >= tree.tokens.len) break;
-        const capture_is_ref = tree.tokenTag(capture_token) == .asterisk;
-        const name_token = capture_token + @intFromBool(capture_is_ref);
-        capture_token = name_token + 2;
 
-        if (try typeStrOfToken(builder, name_token)) |type_str| {
-            try appendTypeHintString(builder, name_token, type_str);
-        }
-    }
-}
-
-/// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
-fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) Analyser.Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (call.ast.params.len == 0) return;
-    if (builder.config.inlay_hints_exclude_single_argument and call.ast.params.len == 1) return;
-
-    const handle = builder.handle;
-    const tree = &handle.tree;
-
-    switch (tree.nodeTag(call.ast.fn_expr)) {
-        .identifier, .field_access, .enum_literal => try writeCallHint(builder, call),
-        else => {},
+    var it = payload.bindings.iter(tree);
+    while (it.next(tree)) |binding| {
+        const name_token = binding.get(tree).name(tree) orelse continue;
+        const type_str = try typeStrOfToken(builder, name_token) orelse continue;
+        try appendTypeHintString(builder, name_token, type_str);
     }
 }
 
@@ -456,119 +442,90 @@ fn writeNodeInlayHint(
     tree: *const Ast,
     node: Ast.Node.Index,
 ) Analyser.Error!void {
-    switch (tree.nodeTag(node)) {
-        .call_one,
-        .call_one_comma,
-        .call,
-        .call_comma,
-        => {
+    switch (node.tag(tree)) {
+        .expr_call => {
             if (!builder.config.inlay_hints_show_parameter_name) return;
-
-            var params: [1]Ast.Node.Index = undefined;
-            const call = tree.fullCall(&params, node).?;
-            try writeCallNodeHint(builder, call);
+            const expr: Ast.Expr.Call = node.cast(.expr_call, tree).?;
+            try writeCallHint(builder, expr);
         },
-        .local_var_decl,
-        .simple_var_decl,
-        .global_var_decl,
-        .aligned_var_decl,
-        => {
+        inline .var_local, .var_global => |t| {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-            const var_decl = builder.handle.tree.fullVarDecl(node).?;
-            if (var_decl.ast.type_node != .none) return;
+            const var_decl = node.cast(t, tree).?;
+            if (var_decl.type != null) return;
 
             try appendTypeHintString(
                 builder,
-                var_decl.ast.mut_token + 1,
+                var_decl.name(tree) orelse return,
                 try typeStrOfNode(builder, node) orelse return,
             );
         },
-        .assign_destructure => {
+        .expr_destructure => {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-            const assign_destructure = tree.assignDestructure(node);
-            for (assign_destructure.ast.variables) |lhs_node| {
-                const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
-                if (var_decl.ast.type_node != .none) continue;
-                try inferAppendTypeStr(builder, var_decl.ast.mut_token + 1);
+            const expr: Ast.Expr.Destructure = node.cast(.expr_destructure, tree).?;
+            var it = expr.lvalues.iter(tree);
+            while (it.next(tree)) |lvalue| {
+                const var_proto = switch (lvalue.get(tree)) {
+                    .expr => continue,
+                    .var_proto => |var_proto| var_proto.get(tree),
+                };
+                if (var_proto.type != null) continue;
+                const name_token = var_proto.name(tree) orelse continue;
+                try inferAppendTypeStr(builder, name_token);
             }
         },
-        .if_simple,
-        .@"if",
+        .expr_if,
+        .expr_if_else,
+        .expr_if_payload,
+        .expr_if_full,
         => {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-            const full_if = builder.handle.tree.fullIf(node).?;
-            if (full_if.payload_token) |token| try inferAppendTypeStr(builder, token);
-            if (full_if.error_token) |token| try inferAppendTypeStr(builder, token);
+            const node_index: Ast.Expr.If.Index = .{ .idx = node };
+            const expr = node_index.get(tree);
+            if (expr.then_payload) |payload| try writePayloadHint(builder, payload.get(tree));
+            if (expr.else_payload) |payload| try writePayloadHint(builder, payload.get(tree));
         },
-        .for_simple,
-        .@"for",
-        => {
+        .expr_for => {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-            try writeForCaptureHint(builder, node);
+            const expr: Ast.Expr.For = node.cast(.expr_for, tree).?;
+            try writePayloadHint(builder, expr.payload.get(tree));
         },
-        .while_simple,
-        .while_cont,
-        .@"while",
-        => {
+        .expr_while => {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-            const full_while = builder.handle.tree.fullWhile(node).?;
-            if (full_while.payload_token) |token| try inferAppendTypeStr(builder, token);
-            if (full_while.error_token) |token| try inferAppendTypeStr(builder, token);
+            const expr: Ast.Expr.While = node.cast(.expr_while, tree).?;
+            if (expr.payload) |payload| try writePayloadHint(builder, payload.get(tree));
+            if (expr.else_payload) |payload| try writePayloadHint(builder, payload.get(tree));
         },
-        .switch_case_one,
-        .switch_case_inline_one,
-        .switch_case,
-        .switch_case_inline,
-        => {
+        .switch_prong => {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-            const full_case = builder.handle.tree.fullSwitchCase(node).?;
-            if (full_case.payload_token) |token| try inferAppendTypeStr(builder, token);
+            const expr: Ast.Expr.Switch.Prong = node.cast(.switch_prong, tree).?;
+            if (expr.payload) |payload| try writePayloadHint(builder, payload.get(tree));
         },
-        .@"catch" => {
+        .expr_catch => {
             if (!builder.config.inlay_hints_show_variable_type_hints) return;
-
-            const catch_token = tree.nodeMainToken(node) + 2;
-            if (catch_token < tree.tokens.len and
-                tree.tokenTag(catch_token - 1) == .pipe and
-                tree.tokenTag(catch_token) == .identifier)
-            {
-                try inferAppendTypeStr(builder, catch_token);
-            }
+            const expr: Ast.Expr.Catch = node.cast(.expr_catch, tree).?;
+            if (expr.payload) |payload| try writePayloadHint(builder, payload.get(tree));
         },
-        .builtin_call_two,
-        .builtin_call_two_comma,
-        .builtin_call,
-        .builtin_call_comma,
-        => {
+        .expr_builtin_call => {
             if (!builder.config.inlay_hints_show_parameter_name or !builder.config.inlay_hints_show_builtin) return;
+            const expr: Ast.Expr.Builtin = node.cast(.expr_builtin_call, tree).?;
 
-            const name = offsets.tokenToSlice(tree, tree.nodeMainToken(node));
+            const name = offsets.tokenToSlice(tree, expr.callee.token(tree));
             const item = std.zig.BuiltinFn.list.get(name) orelse return;
             if (excluded_builtins_set.get(item.tag)) return;
 
-            var buffer: [2]Ast.Node.Index = undefined;
-            const params = tree.builtinCallParams(&buffer, node).?;
-
-            if (params.len == 0) return;
-
-            if (data.builtins.get(name)) |builtin| {
-                try writeBuiltinHint(builder, params, builtin.parameters);
-            }
+            const builtin_data = data.builtins.get(name) orelse return;
+            try writeBuiltinHint(builder, expr, builtin_data.parameters);
         },
-        .struct_init_one,
-        .struct_init_one_comma,
-        .struct_init_dot_two,
-        .struct_init_dot_two_comma,
-        .struct_init_dot,
-        .struct_init_dot_comma,
-        .struct_init,
-        .struct_init_comma,
-        => {
+        .expr_init => {
             if (!builder.config.inlay_hints_show_struct_literal_field_type) return;
-            var buffer: [2]Ast.Node.Index = undefined;
-            const struct_init = tree.fullStructInit(&buffer, node).?;
-            for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
-                const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
+            const expr: Ast.Expr.Init = node.cast(.expr_init, tree).?;
+            var it = expr.fields.iter(tree);
+            while (it.next(tree)) |field| {
+                const struct_field = switch (field.get(tree)) {
+                    .struct_field => |struct_field| struct_field.get(tree),
+                    .tuple_field => continue,
+                };
+                const name_token = struct_field.name.token(tree);
                 const name_loc = offsets.tokenToLoc(tree, name_token);
                 const name = offsets.locToSlice(tree.source, name_loc);
                 const decl, const type_maybe = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;

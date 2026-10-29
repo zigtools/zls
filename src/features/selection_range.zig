@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/selectionRange`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_selectionRange)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const ast = @import("../ast.zig");
@@ -29,7 +29,7 @@ pub fn @"textDocument/selectionRange"(
     for (request.positions, result) |position, *root_selection_range| {
         const source_index = offsets.positionToIndex(handle.tree.source, position, server.offset_encoding);
 
-        var stack: std.ArrayList(struct { Ast.Node.Index, offsets.Loc }) = .empty;
+        var stack: std.ArrayList(offsets.Loc) = .empty;
         var walker: ast.Walker = try .init(arena, tree, .root);
         defer walker.deinit(arena);
         while (try walker.next(arena, tree)) |event| {
@@ -37,7 +37,7 @@ pub fn @"textDocument/selectionRange"(
                 .open => |node| {
                     const loc = offsets.nodeToLoc(tree, node);
                     if (loc.start <= source_index and source_index <= loc.end) {
-                        try stack.append(arena, .{ node, loc });
+                        try stack.append(arena, loc);
                     } else {
                         walker.skip();
                     }
@@ -51,27 +51,7 @@ pub fn @"textDocument/selectionRange"(
             try builder.add(arena, offsets.nodeToLoc(tree, .root));
             continue;
         }
-        while (stack.pop()) |item| {
-            const node = item[0];
-            const loc = item[1];
-
-            switch (tree.nodeTag(node)) {
-                // Function parameters are not stored in the AST explicitly, iterate over them
-                // manually.
-                .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple => {
-                    var buffer: [1]Ast.Node.Index = undefined;
-                    const fn_proto = handle.tree.fullFnProto(&buffer, node).?;
-                    var param_it: ast.FnParamIterator = .init(&fn_proto, &handle.tree);
-                    while (param_it.next()) |param| {
-                        const param_loc = ast.paramLoc(tree, param, true);
-                        if (!(param_loc.start <= source_index and source_index <= param_loc.end)) continue;
-                        try builder.add(arena, param_loc);
-                        break;
-                    }
-                },
-                else => {},
-            }
-
+        while (stack.pop()) |loc| {
             try builder.add(arena, loc);
         }
     }

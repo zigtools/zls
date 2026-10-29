@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/semanticTokens/*`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_semanticTokens)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const offsets = @import("../offsets.zig");
 const DocumentStore = @import("../DocumentStore.zig");
@@ -114,10 +114,10 @@ const Builder = struct {
     /// Only emit tokens for the given source range.
     loc: ?offsets.Loc,
 
-    fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
+    fn add(self: *Builder, token: Ast.Token.Index, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
         const tree = &self.handle.tree;
 
-        try self.handleComments(self.previous_source_index, tree.tokenStart(token));
+        try self.handleComments(self.previous_source_index, token.byteOffset(tree));
         try self.addDirect(token_type, token_modifiers, offsets.tokenToLoc(tree, token));
     }
 
@@ -232,40 +232,20 @@ const Builder = struct {
     }
 };
 
-fn writeToken(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType) error{OutOfMemory}!void {
+fn writeToken(builder: *Builder, token_idx: ?Ast.Token.Index, tok_type: TokenType) error{OutOfMemory}!void {
     return try writeTokenMod(builder, token_idx, tok_type, .{});
 }
 
-fn writeTokenMod(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) error{OutOfMemory}!void {
+fn writeTokenMod(builder: *Builder, token_idx: ?Ast.Token.Index, tok_type: TokenType, tok_mod: TokenModifiers) error{OutOfMemory}!void {
     if (token_idx) |ti| {
         try builder.add(ti, tok_type, tok_mod);
     }
 }
 
-fn fieldTokenType(
-    container_decl: Ast.Node.Index,
-    handle: *DocumentStore.Handle,
-    is_static_access: bool,
-) ?TokenType {
-    std.debug.assert(ast.isContainer(&handle.tree, container_decl));
-    if (handle.tree.nodeTag(container_decl) == .root) return .property;
-    if (is_static_access and ast.isTaggedUnion(&handle.tree, container_decl))
-        return .enumMember;
-    const main_token = handle.tree.nodeMainToken(container_decl);
-    if (main_token > handle.tree.tokens.len) return null;
-    return switch (handle.tree.tokenTag(main_token)) {
-        .keyword_struct, .keyword_union => .property,
-        .keyword_enum => .enumMember,
-        .keyword_error => .errorTag,
-        .keyword_opaque => .property, // opaque can't have fields but it's still syntactically valid
-        else => unreachable,
-    };
-}
-
 fn colorIdentifierBasedOnType(
     builder: *Builder,
     type_node: Analyser.Type,
-    target_tok: Ast.TokenIndex,
+    target_tok: Ast.Token.Index,
     is_parameter: bool,
     tok_mod: TokenModifiers,
 ) error{OutOfMemory}!void {
@@ -314,106 +294,163 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void 
         if (!offsets.locIntersect(loc, offsets.nodeToLoc(tree, node))) return;
     }
 
-    const main_token = tree.nodeMainToken(node);
+    const main_token = node.mainToken(tree);
 
-    switch (tree.nodeTag(node)) {
+    switch (node.tag(tree)) {
+        else => |tag| std.debug.panic("BRANCH_TODO: writeNodeTokens(.{t})", .{tag}),
         .root => unreachable,
-        .container_field,
-        .container_field_align,
-        .container_field_init,
-        => try writeContainerField(builder, node, .root),
-        .block,
-        .block_semicolon,
-        .block_two,
-        .block_two_semicolon,
-        => {
-            if (ast.blockLabel(tree, node)) |label_token| {
+        .missing, .none => {},
+        .leaf => {
+            switch (main_token.tag(tree)) {
+                else => |tag| std.debug.panic("BRANCH_TODO: writeNodeTokens(.{t})", .{tag}),
+                .name => try writeIdentifier(builder, main_token),
+                .string, .char => {
+                    try writeToken(builder, main_token, .string);
+                    if (!builder.limited and builder.overlappingTokenSupport) {
+                        const string_start = main_token.byteOffset(tree);
+                        const string = offsets.nodeToSlice(tree, node);
+                        var offset: usize = 0;
+                        while (offset < string.len) {
+                            const slash_index = std.mem.findScalarPos(u8, string, offset, '\\') orelse break;
+                            offset = slash_index;
+                            _ = std.zig.string_literal.parseEscapeSequence(string, &offset);
+                            try builder.addDirect(.escapeSequence, .{}, .{
+                                .start = slash_index + string_start,
+                                .end = offset + string_start,
+                            });
+                        }
+                    }
+                },
+                .multiline_string_line => {
+                    const multiline_string_line: Ast.Expr.MultilineString.Index = .{ .idx = node };
+                    var it = multiline_string_line.get(tree).iter;
+                    while (it.next(tree)) |_| {
+                        try writeToken(builder, it.current, .string);
+                    }
+                },
+                .@"unreachable" => try writeToken(builder, main_token, .keywordLiteral),
+                .number => try writeToken(builder, main_token, .number),
+            }
+        },
+        .leaf_enum_literal => {
+            try writeToken(builder, main_token, .enumMember);
+        },
+        .member_field => {
+            const member_field: Ast.Member.Field = node.cast(.member_field, tree).?;
+            try writeContainerField(builder, member_field, null);
+        },
+        .block => {
+            const block: Ast.Block = node.cast(.block, tree).?;
+            if (block.label(tree)) |label_token| {
                 try writeTokenMod(builder, label_token, .label, .{ .declaration = true });
             }
 
-            var buffer: [2]Ast.Node.Index = undefined;
-            const statements = tree.blockStatements(&buffer, node).?;
-
-            for (statements) |child| {
-                try writeNodeTokens(builder, child);
+            var it = block.statements.iter(tree);
+            while (it.next(tree)) |child| {
+                try writeNodeTokens(builder, child.idx);
             }
         },
-        .global_var_decl,
-        .local_var_decl,
-        .simple_var_decl,
-        .aligned_var_decl,
-        => {
+        .var_local => {
             const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, handle));
-            try writeVarDecl(builder, node, resolved_type);
+            try writeVarDecl(builder, ast.globalVarFromLocal(.{ .idx = node }, tree), true, resolved_type);
         },
-        .container_decl,
-        .container_decl_trailing,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        => {
-            var buf: [2]Ast.Node.Index = undefined;
-            const decl: Ast.full.ContainerDecl = tree.fullContainerDecl(&buf, node).?;
+        .var_global => {
+            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(node, handle));
+            try writeVarDecl(builder, node.cast(.var_global, tree).?, false, resolved_type);
+        },
+        .type_container => {
+            const decl: Ast.Expr.Container = node.cast(.type_container, tree).?;
 
-            try writeToken(builder, decl.layout_token, .keyword);
-            try writeToken(builder, decl.ast.main_token, .keyword);
-            if (decl.ast.enum_token) |enum_token| {
-                try writeToken(builder, enum_token, .keyword);
-            }
-            if (decl.ast.arg.unwrap()) |arg| {
-                try writeNodeTokens(builder, arg);
-            }
+            const attributes = decl.attributes(tree);
+            if (attributes.@"extern") |token| try writeToken(builder, token, .keyword);
+            if (attributes.@"packed") |token| try writeToken(builder, token, .keyword);
 
-            for (decl.ast.members) |child| {
-                if (tree.nodeTag(child).isContainerField()) {
-                    try writeContainerField(builder, child, node);
+            const kind_token = switch (decl.kind.get(tree)) {
+                .@"enum" => |enum_idx| switch (enum_idx.get(tree)) {
+                    .@"enum" => |v| v.token(tree),
+                    .with_backing => @panic("BRANCH_TODO"),
+                },
+                .@"union" => |union_idx| switch (union_idx.get(tree)) {
+                    .@"union" => |v| v.token(tree),
+                    .with_backing => @panic("BRANCH_TODO"),
+                },
+                .@"struct" => |struct_idx| switch (struct_idx.get(tree)) {
+                    .@"struct" => |v| v.token(tree),
+                    .with_backing => @panic("BRANCH_TODO"),
+                },
+                .@"opaque" => |opaque_idx| opaque_idx.token(tree),
+            };
+
+            try writeToken(builder, kind_token, .keyword);
+
+            var it = decl.members.iter(tree);
+            while (it.next(tree)) |member| {
+                if (member.cast(.field, tree)) |member_field| {
+                    try writeContainerField(builder, member_field.get(tree), decl);
                 } else {
-                    try writeNodeTokens(builder, child);
+                    try writeNodeTokens(builder, member.idx);
                 }
             }
         },
-        .error_set_decl => {
-            try writeToken(builder, main_token, .keyword);
+        .type_error_set => {
+            const expr: Ast.Expr.ErrorSet = node.cast(.type_error_set, tree).?;
 
-            const lbrace, const rbrace = tree.nodeData(node).token_and_token;
-            for (lbrace + 1..rbrace) |tok_i| {
-                switch (tree.tokenTag(@intCast(tok_i))) {
-                    .doc_comment, .comma => {},
-                    .identifier => try writeTokenMod(builder, @intCast(tok_i), .errorTag, .{ .declaration = true }),
-                    else => {},
-                }
+            try writeToken(builder, node.mainToken(tree), .keyword);
+
+            var it = expr.errors.iter(tree);
+            while (it.next(tree)) |err| {
+                const error_token = err.get(tree).token;
+                try writeTokenMod(builder, error_token, .errorTag, .{ .declaration = true });
             }
         },
-        .error_value => {
-            const error_token = tree.nodeMainToken(node);
+        .expr_error => {
+            const expr: Ast.Expr.Error = node.cast(.expr_error, tree).?;
+
+            const error_token = node.mainToken(tree);
             try writeToken(builder, error_token, .keyword);
-            const name_token = error_token + 2;
-            if (name_token < tree.tokens.len and tree.tokenTag(name_token) == .identifier) {
-                try writeToken(builder, name_token, .errorTag);
-            } else {
-                // parser error
-            }
-        },
-        .fn_proto,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_proto_multi,
-        .fn_decl,
-        => |tag| {
-            var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto: Ast.full.FnProto = tree.fullFnProto(&buf, node).?;
 
-            try writeToken(builder, fn_proto.visib_token, .keyword);
-            try writeToken(builder, fn_proto.extern_export_inline_token, .keyword);
-            try writeToken(builder, fn_proto.lib_name, .string);
-            try writeToken(builder, fn_proto.ast.fn_token, .keyword);
+            const name_token = expr.rhs.token(tree);
+            try writeToken(builder, name_token, .errorTag);
+        },
+        .type_fn,
+        .decl_fn,
+        => |tag| {
+            const fn_proto: Ast.Expr.Fn, const attributes: Ast.Member.Fn.Attributes, const body: ?Ast.Block.Index = switch (tag) {
+                .type_fn => blk: {
+                    const fn_proto = node.cast(.type_fn, tree).?;
+                    const attributes = fn_proto.attributes(tree);
+                    break :blk .{ fn_proto, .{
+                        .@"pub" = null,
+                        .@"export" = null,
+                        .@"inline" = null,
+                        .@"noinline" = null,
+                        .@"extern" = null,
+
+                        .@"align" = attributes.@"align",
+                        .@"callconv" = attributes.@"callconv",
+                        .@"addrspace" = attributes.@"addrspace",
+                        .@"linksection" = attributes.@"linksection",
+                    }, null };
+                },
+                .decl_fn => blk: {
+                    const decl_fn = node.cast(.decl_fn, tree).?;
+                    break :blk .{
+                        decl_fn.proto.get(tree),
+                        decl_fn.attributes(tree),
+                        decl_fn.body,
+                    };
+                },
+                else => unreachable,
+            };
+            const fn_token = fn_proto.@"fn".token(tree);
+
+            try writeToken(builder, attributes.@"pub", .keyword);
+            try writeToken(builder, attributes.@"export" orelse attributes.@"inline" orelse attributes.@"noinline", .keyword);
+            if (attributes.@"extern") |@"extern"| {
+                try writeToken(builder, @"extern".@"extern", .keyword);
+                try writeToken(builder, @"extern".string, .keyword);
+            }
+            try writeToken(builder, fn_token, .keyword);
 
             var is_generic = false;
             var func_name_tok_type: TokenType = .function;
@@ -422,7 +459,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void 
                 if (func_ty.isTypeFunc()) {
                     func_name_tok_type = .type;
                 } else {
-                    const container_ty = try builder.analyser.innermostContainer(handle, tree.tokenStart(fn_proto.ast.fn_token));
+                    const container_ty = try builder.analyser.innermostContainer(handle, fn_token.byteOffset(tree));
                     if (container_ty.data.container.scope_handle.scope != .root and
                         builder.analyser.firstParamIs(func_ty, container_ty))
                     {
@@ -436,653 +473,521 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void 
                 .generic = is_generic,
             };
 
-            try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
+            try writeTokenMod(builder, fn_proto.name(tree), func_name_tok_type, tok_mod);
 
-            var it: ast.FnParamIterator = .init(&fn_proto, tree);
-            while (it.next()) |param_decl| {
-                try writeToken(builder, param_decl.comptime_noalias, .keyword);
+            var it = fn_proto.params.get(tree).items.iter(tree);
+            while (it.next(tree)) |param_idx| {
+                const param = param_idx.get(tree);
+                const param_attributes = param.attributes(tree);
+                const param_type = param.type.get(tree);
 
-                const token_type: TokenType = if (param_decl.type_expr) |type_expr|
-                    if (Analyser.isMetaType(tree, type_expr))
-                        .typeParameter
-                    else
-                        .parameter
-                else
-                    .parameter;
-                try writeTokenMod(builder, param_decl.name_token, token_type, .{ .declaration = true });
+                try writeToken(builder, param_attributes.@"noalias" orelse param_attributes.@"comptime", .keyword);
 
-                if (param_decl.anytype_ellipsis3) |any_token| {
-                    try writeToken(builder, any_token, .type);
-                } else try writeNodeTokens(builder, param_decl.type_expr.?);
-            }
-
-            if (fn_proto.ast.align_expr.unwrap()) |align_expr| {
-                try writeToken(builder, tree.firstToken(align_expr) - 2, .keyword);
-                try writeNodeTokens(builder, align_expr);
-            }
-            if (fn_proto.ast.addrspace_expr.unwrap()) |addrspace_expr| {
-                try writeToken(builder, tree.firstToken(addrspace_expr) - 2, .keyword);
-                try writeNodeTokens(builder, addrspace_expr);
-            }
-            if (fn_proto.ast.section_expr.unwrap()) |section_expr| {
-                try writeToken(builder, tree.firstToken(section_expr) - 2, .keyword);
-                try writeNodeTokens(builder, section_expr);
-            }
-            if (fn_proto.ast.callconv_expr.unwrap()) |callconv_expr| {
-                try writeToken(builder, tree.firstToken(callconv_expr) - 2, .keyword);
-                try writeNodeTokens(builder, callconv_expr);
-            }
-            if (fn_proto.ast.return_type.unwrap()) |return_type| {
-                try writeNodeTokens(builder, return_type);
-            }
-
-            if (tag == .fn_decl) {
-                try writeNodeTokens(builder, tree.nodeData(node).node_and_node[1]);
-            }
-        },
-        .anyframe_type => {
-            try writeToken(builder, main_token, .keyword);
-            try writeNodeTokens(builder, tree.nodeData(node).token_and_node[1]);
-        },
-        .@"errdefer", .@"defer" => {
-            try writeToken(builder, main_token, .keyword);
-            try writeNodeTokens(builder, tree.nodeData(node).node);
-        },
-        .@"switch",
-        .switch_comma,
-        => {
-            const switch_node = tree.fullSwitch(node).?;
-            try writeTokenMod(builder, switch_node.label_token, .label, .{ .declaration = true });
-            try writeToken(builder, switch_node.ast.switch_token, .keyword);
-            try writeNodeTokens(builder, switch_node.ast.condition);
-            for (switch_node.ast.cases) |case_node| {
-                try writeNodeTokens(builder, case_node);
-            }
-        },
-        .switch_case_one,
-        .switch_case,
-        .switch_case_inline_one,
-        .switch_case_inline,
-        => {
-            const switch_case = tree.fullSwitchCase(node).?;
-            try writeToken(builder, switch_case.inline_token, .keyword);
-            for (switch_case.ast.values) |item_node| try writeNodeTokens(builder, item_node);
-            // check it it's 'else'
-            if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);
-            if (switch_case.payload_token) |payload_token| {
-                const actual_payload = payload_token + @intFromBool(tree.tokenTag(payload_token) == .asterisk);
-                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
-            }
-            try writeNodeTokens(builder, switch_case.ast.target_expr);
-        },
-        .@"while",
-        .while_simple,
-        .while_cont,
-        => {
-            const while_node = ast.fullWhile(tree, node).?;
-            try writeTokenMod(builder, while_node.label_token, .label, .{ .declaration = true });
-            try writeToken(builder, while_node.inline_token, .keyword);
-            try writeToken(builder, while_node.ast.while_token, .keyword);
-            try writeNodeTokens(builder, while_node.ast.cond_expr);
-            if (while_node.payload_token) |payload| {
-                const capture_is_ref = tree.tokenTag(payload) == .asterisk;
-                const name_token = payload + @intFromBool(capture_is_ref);
-                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
-            }
-            if (while_node.ast.cont_expr.unwrap()) |cont_expr| try writeNodeTokens(builder, cont_expr);
-            try writeNodeTokens(builder, while_node.ast.then_expr);
-
-            if (while_node.ast.else_expr.unwrap()) |else_expr| {
-                try writeToken(builder, while_node.else_token, .keyword);
-
-                if (while_node.error_token) |err_token| {
-                    try writeTokenMod(builder, err_token, .variable, .{ .declaration = true });
+                if (param.name) |name| {
+                    const token_type: TokenType = switch (param_type) {
+                        .expr => .parameter,
+                        .@"anytype" => .typeParameter,
+                        .varargs => .parameter,
+                    };
+                    try writeTokenMod(builder, name.token(tree), token_type, .{ .declaration = true });
                 }
-                try writeNodeTokens(builder, else_expr);
-            }
-        },
-        .for_simple,
-        .@"for",
-        => {
-            const for_node = ast.fullFor(tree, node).?;
-            try writeTokenMod(builder, for_node.label_token, .label, .{ .declaration = true });
-            try writeToken(builder, for_node.inline_token, .keyword);
-            try writeToken(builder, for_node.ast.for_token, .keyword);
 
-            for (for_node.ast.inputs) |input_node| {
-                try writeNodeTokens(builder, input_node);
-            }
-
-            var capture_token = for_node.payload_token;
-            for (for_node.ast.inputs) |_| {
-                if (capture_token >= tree.tokens.len - 1) break;
-                const capture_is_ref = tree.tokenTag(capture_token) == .asterisk;
-                const name_token = capture_token + @intFromBool(capture_is_ref);
-                capture_token = name_token + 2;
-
-                if (tree.tokenTag(name_token) != .identifier) continue;
-                try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
-            }
-            try writeNodeTokens(builder, for_node.ast.then_expr);
-
-            if (for_node.ast.else_expr.unwrap()) |else_expr| {
-                try writeToken(builder, for_node.else_token, .keyword);
-                try writeNodeTokens(builder, else_expr);
-            }
-        },
-        .@"if",
-        .if_simple,
-        => {
-            const if_node = ast.fullIf(tree, node).?;
-
-            try writeToken(builder, if_node.ast.if_token, .keyword);
-            try writeNodeTokens(builder, if_node.ast.cond_expr);
-
-            if (if_node.payload_token) |payload_token| {
-                const capture_is_ref = tree.tokenTag(payload_token) == .asterisk;
-                const actual_payload = payload_token + @intFromBool(capture_is_ref);
-                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
-            }
-            try writeNodeTokens(builder, if_node.ast.then_expr);
-
-            if (if_node.ast.else_expr.unwrap()) |else_expr| {
-                try writeToken(builder, if_node.else_token, .keyword);
-                if (if_node.error_token) |err_token| {
-                    try writeTokenMod(builder, err_token, .variable, .{ .declaration = true });
+                switch (param_type) {
+                    .expr => |expr_node| try writeNodeTokens(builder, expr_node.idx),
+                    .@"anytype" => |leaf_node| try writeToken(builder, leaf_node.token(tree), .type),
+                    .varargs => |leaf_node| try writeToken(builder, leaf_node.token(tree), .type),
                 }
-                try writeNodeTokens(builder, else_expr);
             }
-        },
-        .array_init,
-        .array_init_comma,
-        .array_init_one,
-        .array_init_one_comma,
-        .array_init_dot,
-        .array_init_dot_comma,
-        .array_init_dot_two,
-        .array_init_dot_two_comma,
-        => {
-            var buf: [2]Ast.Node.Index = undefined;
-            const array_init: Ast.full.ArrayInit = tree.fullArrayInit(&buf, node).?;
 
-            if (array_init.ast.type_expr.unwrap()) |type_expr| {
-                try writeNodeTokens(builder, type_expr);
+            if (attributes.@"align") |align_expr| {
+                try writeToken(builder, align_expr.idx.firstToken(tree).add(-2), .keyword);
+                try writeNodeTokens(builder, align_expr.idx);
             }
-            for (array_init.ast.elements) |elem| try writeNodeTokens(builder, elem);
+            if (attributes.@"addrspace") |addrspace_expr| {
+                try writeToken(builder, addrspace_expr.idx.firstToken(tree).add(-2), .keyword);
+                try writeNodeTokens(builder, addrspace_expr.idx);
+            }
+            if (attributes.@"linksection") |section_expr| {
+                try writeToken(builder, section_expr.idx.firstToken(tree).add(-2), .keyword);
+                try writeNodeTokens(builder, section_expr.idx);
+            }
+            if (attributes.@"callconv") |callconv_expr| {
+                try writeToken(builder, callconv_expr.idx.firstToken(tree).add(-2), .keyword);
+                try writeNodeTokens(builder, callconv_expr.idx);
+            }
+            try writeNodeTokens(builder, fn_proto.return_type.idx);
+
+            if (body) |body_idx| {
+                try writeNodeTokens(builder, body_idx.idx);
+            }
         },
-        .struct_init,
-        .struct_init_comma,
-        .struct_init_dot,
-        .struct_init_dot_comma,
-        .struct_init_one,
-        .struct_init_one_comma,
-        .struct_init_dot_two,
-        .struct_init_dot_two_comma,
+        .stmt_defer => {
+            const stmt: Ast.Statement.Defer = node.cast(.stmt_defer, tree).?;
+            try writeToken(builder, main_token, .keyword);
+            try writeNodeTokens(builder, stmt.body.idx);
+        },
+        .expr_switch => {
+            const expr: Ast.Expr.Switch = node.cast(.expr_switch, tree).?;
+            try writeTokenMod(builder, expr.label(tree), .label, .{ .declaration = true });
+            try writeToken(builder, expr.@"switch".token(tree), .keyword);
+            try writeNodeTokens(builder, expr.condition.idx);
+            var it = expr.prongs.iter(tree);
+            while (it.next(tree)) |prong| {
+                try writeNodeTokens(builder, prong.idx);
+            }
+        },
+        .switch_prong => {
+            const prong: Ast.Expr.Switch.Prong = node.cast(.switch_prong, tree).?;
+            const attributes = prong.attributes(tree);
+
+            try writeToken(builder, attributes.@"inline", .keyword);
+            var case_it = prong.cases.iter(tree);
+            while (case_it.next(tree)) |case| {
+                switch (case.get(tree)) {
+                    .item => |case_expr| try writeNodeTokens(builder, case_expr.idx),
+                    .range => |range_idx| {
+                        const range = range_idx.get(tree);
+                        try writeNodeTokens(builder, range.start.idx);
+                        try writeNodeTokens(builder, range.end.idx);
+                    },
+                    .@"else" => |else_node| try writeToken(builder, else_node.token(tree), .keyword),
+                }
+            }
+            if (prong.payload) |payload| try writePayload(builder, payload.get(tree));
+            try writeNodeTokens(builder, prong.body.idx);
+        },
+        .expr_while => {
+            const expr: Ast.Expr.While = node.cast(.expr_while, tree).?;
+            const attributes = expr.attributes(tree);
+
+            try writeTokenMod(builder, expr.label(tree), .label, .{ .declaration = true });
+
+            try writeToken(builder, attributes.@"inline", .keyword);
+            try writeToken(builder, expr.@"while".token(tree), .keyword);
+            try writeNodeTokens(builder, expr.condition.idx);
+            if (expr.payload) |payload| try writePayload(builder, payload.get(tree));
+            if (expr.advance) |advance_expr| try writeNodeTokens(builder, advance_expr.idx);
+            try writeNodeTokens(builder, expr.body.idx);
+            if (expr.else_payload) |payload| try writePayload(builder, payload.get(tree));
+        },
+        .expr_for => {
+            const expr: Ast.Expr.For = node.cast(.expr_for, tree).?;
+            const attributes = expr.attributes(tree);
+
+            try writeTokenMod(builder, expr.label(tree), .label, .{ .declaration = true });
+            try writeToken(builder, attributes.@"inline", .keyword);
+            try writeToken(builder, expr.@"for".token(tree), .keyword);
+
+            var it = expr.inputs.get(tree).items.iter(tree);
+            while (it.next(tree)) |input| {
+                switch (input.get(tree)) {
+                    .expr => |expr_node| try writeNodeTokens(builder, expr_node.idx),
+                    .range => |range_node| {
+                        const range = range_node.get(tree);
+                        try writeNodeTokens(builder, range.start.idx);
+                        if (range.end) |end| try writeNodeTokens(builder, end.idx);
+                    },
+                }
+            }
+            try writeNodeTokens(builder, expr.body.idx);
+
+            if (expr.@"else") |else_expr| {
+                // BRANCH_TODO try writeToken(builder, for_node.else_token, .keyword);
+                try writeNodeTokens(builder, else_expr.idx);
+            }
+        },
+        .expr_if,
+        .expr_if_else,
+        .expr_if_payload,
+        .expr_if_full,
         => {
-            var buf: [2]Ast.Node.Index = undefined;
-            const struct_init: Ast.full.StructInit = tree.fullStructInit(&buf, node).?;
+            const node_index: Ast.Expr.If.Index = .{ .idx = node };
+            const expr = node_index.get(tree);
+
+            try writeToken(builder, main_token, .keyword);
+            try writeNodeTokens(builder, expr.condition.idx);
+            if (expr.then_payload) |payload| try writePayload(builder, payload.get(tree));
+            try writeNodeTokens(builder, expr.then_branch.idx);
+            if (expr.else_branch) |else_expr| {
+                if (expr.else_payload) |payload| try writePayload(builder, payload.get(tree));
+                try writeNodeTokens(builder, else_expr.idx);
+            }
+        },
+        // .expr_init => {
+        //     var buf: [2]Ast.Node.Index = undefined;
+        //     const array_init: Ast.full.ArrayInit = tree.fullArrayInit(&buf, node).?;
+        //     if (array_init.ast.type_expr.unwrap()) |type_expr| {
+        //         try writeNodeTokens(builder, type_expr);
+        //     }
+        //     for (array_init.ast.elements) |elem| try writeNodeTokens(builder, elem);
+        // },
+        .expr_init => {
+            const expr: Ast.Expr.Init = node.cast(.expr_init, tree).?;
 
             var field_token_type: ?TokenType = null;
 
-            if (struct_init.ast.type_expr.unwrap()) |type_expr| {
-                try writeNodeTokens(builder, type_expr);
+            if (expr.type) |type_expr| {
+                try writeNodeTokens(builder, type_expr.idx);
 
-                if (try builder.analyser.resolveTypeOfNode(.of(type_expr, handle))) |struct_type| {
-                    switch (struct_type.data) {
-                        .container => |info| {
-                            const scope_handle = info.scope_handle;
-                            field_token_type = fieldTokenType(scope_handle.toNode(), scope_handle.handle, false);
-                        },
-                        else => {},
-                    }
+                blk: {
+                    const struct_type = try builder.analyser.resolveTypeOfNode(.of(type_expr.idx, handle)) orelse
+                        break :blk;
+
+                    const scope_handle = switch (struct_type.data) {
+                        .container => |info| info.scope_handle,
+                        else => break :blk,
+                    };
+                    const container = scope_handle.toNode().cast(.type_container, &scope_handle.handle.tree).?;
+
+                    field_token_type = switch (container.kind.get(tree)) {
+                        .@"struct", .@"union" => .property,
+                        .@"enum" => .enumMember,
+                        .@"opaque" => .property, // opaque can't have fields but it's still syntactically valid
+                    };
                 }
             }
 
-            for (struct_init.ast.fields) |field_init| {
-                const init_token = tree.firstToken(field_init);
-                try writeToken(builder, init_token - 2, field_token_type orelse .property); // name
-                try writeToken(builder, init_token - 1, .operator); // '='
-                try writeNodeTokens(builder, field_init);
+            var it = expr.fields.iter(tree);
+            while (it.next(tree)) |field| {
+                switch (field.get(tree)) {
+                    .struct_field => |struct_field_idx| {
+                        const struct_field = struct_field_idx.get(tree);
+                        const name_token = struct_field.name.token(tree);
+                        try writeToken(builder, name_token, field_token_type orelse .property);
+                        try writeToken(builder, name_token.add(1), .operator); // '='
+                        try writeNodeTokens(builder, struct_field.init.idx);
+                    },
+                    .tuple_field => |field_expr| try writeNodeTokens(builder, field_expr.idx),
+                }
             }
         },
-        .call,
-        .call_comma,
-        .call_one,
-        .call_one_comma,
-        => {
-            var params: [1]Ast.Node.Index = undefined;
-            const call = tree.fullCall(&params, node).?;
+        .expr_call => {
+            const expr: Ast.Expr.Call = node.cast(.expr_call, tree).?;
 
-            if (tree.nodeTag(call.ast.fn_expr) == .enum_literal) {
+            if (expr.callee.idx.tag(tree) == .leaf_enum_literal) {
                 // TODO actually try to resolve the decl literal
-                try writeToken(builder, tree.nodeMainToken(call.ast.fn_expr), .function);
+                try writeToken(builder, expr.callee.idx.mainToken(tree), .function);
             } else {
-                try writeNodeTokens(builder, call.ast.fn_expr);
+                try writeNodeTokens(builder, expr.callee.idx);
             }
 
-            for (call.ast.params) |param| try writeNodeTokens(builder, param);
+            var it = expr.args.iter(tree);
+            while (it.next(tree)) |arg| {
+                try writeNodeTokens(builder, arg.idx);
+            }
         },
-        .slice,
-        .slice_open,
-        .slice_sentinel,
-        => {
-            const slice: Ast.full.Slice = tree.fullSlice(node).?;
+        .expr_slice => {
+            const expr: Ast.Expr.Slice = node.cast(.expr_slice, tree).?;
 
-            try writeNodeTokens(builder, slice.ast.sliced);
-            try writeNodeTokens(builder, slice.ast.start);
-            if (slice.ast.end.unwrap()) |end| {
-                try writeNodeTokens(builder, end);
-            }
-            if (slice.ast.sentinel.unwrap()) |sentinel| {
-                try writeNodeTokens(builder, sentinel);
-            }
+            try writeNodeTokens(builder, expr.lhs.idx);
+            try writeNodeTokens(builder, expr.start.idx);
+            if (expr.end) |end| try writeNodeTokens(builder, end.idx);
+            if (expr.sentinel) |sentinel| try writeNodeTokens(builder, sentinel.idx);
         },
-        .deref => {
-            try writeNodeTokens(builder, tree.nodeData(node).node);
+        .expr_deref => {
+            const expr: Ast.Expr.Deref = node.cast(.expr_deref, tree).?;
+            try writeNodeTokens(builder, expr.lhs.idx);
             try writeToken(builder, main_token, .operator);
         },
-        .unwrap_optional => {
-            const lhs, const question_mark_token = tree.nodeData(node).node_and_token;
-            try writeNodeTokens(builder, lhs);
-            try writeToken(builder, question_mark_token, .operator);
+        .expr_unwrap => {
+            const expr: Ast.Expr.Unwrap = node.cast(.expr_unwrap, tree).?;
+            try writeNodeTokens(builder, expr.lhs.idx);
+            try writeToken(builder, main_token, .operator);
         },
-        .grouped_expression => {
-            try writeNodeTokens(builder, tree.nodeData(node).node_and_token[0]);
+        .expr_group => {
+            const expr: Ast.Expr.Grouping = node.cast(.expr_group, tree).?;
+            try writeNodeTokens(builder, expr.inner.idx);
         },
-        .@"break", .@"continue" => {
-            const opt_target, const opt_rhs = tree.nodeData(node).opt_token_and_opt_node;
+        inline .expr_break, .expr_continue => |t| {
+            const expr = node.cast(t, tree).?;
             try writeToken(builder, main_token, .keyword);
-            if (opt_target.unwrap()) |target| {
-                try writeToken(builder, target, .label);
-            }
-            if (opt_rhs.unwrap()) |rhs| {
-                try writeNodeTokens(builder, rhs);
-            }
+            if (expr.label(tree)) |target| try writeToken(builder, target, .label);
+            if (expr.value) |value| try writeNodeTokens(builder, value.idx);
         },
-        .@"comptime", .@"nosuspend", .@"suspend" => {
+        .expr_comptime => {
+            const expr: Ast.Expr.Comptime = node.cast(.expr_comptime, tree).?;
             try writeToken(builder, main_token, .keyword);
-            try writeNodeTokens(builder, tree.nodeData(node).node);
+            try writeNodeTokens(builder, expr.inner.idx);
         },
-        .@"return" => {
-            try writeToken(builder, main_token, .keyword);
-            if (tree.nodeData(node).opt_node.unwrap()) |lhs| {
-                try writeNodeTokens(builder, lhs);
-            }
+        .expr_return => {
+            const expr: Ast.Expr.Return = node.cast(.expr_return, tree).?;
+            try writeToken(builder, expr.@"return".token(tree), .keyword);
+            if (expr.value) |value| try writeNodeTokens(builder, value.idx);
         },
-        .number_literal => {
-            try writeToken(builder, main_token, .number);
-        },
-        .enum_literal => {
-            try writeToken(builder, main_token, .enumMember);
-        },
-        .builtin_call,
-        .builtin_call_comma,
-        .builtin_call_two,
-        .builtin_call_two_comma,
-        => {
-            var buffer: [2]Ast.Node.Index = undefined;
-            const params = tree.builtinCallParams(&buffer, node).?;
+        .expr_builtin_call => {
+            const expr: Ast.Expr.Builtin = node.cast(.expr_builtin_call, tree).?;
 
-            const name = offsets.identifierTokenToNameSlice(tree, main_token);
+            const builtin_token = expr.callee.token(tree);
+            const name = offsets.identifierTokenToNameSlice(tree, builtin_token);
             const is_deprecated =
                 std.mem.eql(u8, name, "enumFromInt") or
                 std.mem.eql(u8, name, "intFromEnum") or
                 std.mem.eql(u8, name, "intFromFloat");
 
-            try writeTokenMod(builder, main_token, .builtin, .{ .deprecated = is_deprecated });
-            for (params) |param|
-                try writeNodeTokens(builder, param);
-        },
-        .string_literal,
-        .char_literal,
-        => {
-            try writeToken(builder, main_token, .string);
-            if (!builder.limited and builder.overlappingTokenSupport) {
-                const string_start = tree.tokenStart(main_token);
-                const string = offsets.nodeToSlice(tree, node);
-                var offset: usize = 0;
-                while (offset < string.len) {
-                    const slash_index = std.mem.findScalarPos(u8, string, offset, '\\') orelse break;
-                    offset = slash_index;
-                    _ = std.zig.string_literal.parseEscapeSequence(string, &offset);
-                    try builder.addDirect(.escapeSequence, .{}, .{
-                        .start = slash_index + string_start,
-                        .end = offset + string_start,
-                    });
-                }
-            }
-        },
-        .multiline_string_literal => {
-            const first_token, const last_token = tree.nodeData(node).token_and_token;
-            for (first_token..last_token + 1) |cur_tok| {
-                try writeToken(builder, @intCast(cur_tok), .string);
-            }
-        },
-        .unreachable_literal => {
-            try writeToken(builder, main_token, .keywordLiteral);
-        },
-        .asm_simple,
-        .@"asm",
-        => {
-            const asm_node: Ast.full.Asm = ast.fullAsm(tree, node).?;
-
-            try writeToken(builder, main_token, .keyword);
-            try writeToken(builder, asm_node.volatile_token, .keyword);
-            try writeNodeTokens(builder, asm_node.ast.template);
-
-            for (asm_node.outputs) |output_node| {
-                try writeToken(builder, tree.nodeMainToken(output_node), .variable);
-                try writeToken(builder, tree.nodeMainToken(output_node) + 2, .string);
-                const has_arrow = tree.tokenTag(tree.nodeMainToken(output_node) + 4) == .arrow;
-                if (has_arrow) {
-                    if (tree.nodeData(output_node).opt_node_and_token[0].unwrap()) |lhs| {
-                        try writeNodeTokens(builder, lhs);
-                    }
-                } else {
-                    try writeToken(builder, tree.nodeMainToken(output_node) + 4, .variable);
-                }
-            }
-
-            for (asm_node.inputs) |input_node| {
-                try writeToken(builder, tree.nodeMainToken(input_node), .variable);
-                try writeToken(builder, tree.nodeMainToken(input_node) + 2, .string);
-                try writeNodeTokens(builder, tree.nodeData(input_node).node_and_token[0]);
-            }
-
-            if (asm_node.ast.clobbers.unwrap()) |clobers_node| {
-                try writeNodeTokens(builder, clobers_node);
+            try writeTokenMod(builder, builtin_token, .builtin, .{ .deprecated = is_deprecated });
+            var it = expr.args.iter(tree);
+            while (it.next(tree)) |arg| {
+                try writeNodeTokens(builder, arg.idx);
             }
         },
         .asm_output,
         .asm_input,
         => unreachable,
-        .test_decl => {
-            const opt_name_token, const block = tree.nodeData(node).opt_token_and_node;
+        .decl_test => {
+            const decl_test: Ast.Member.Test = node.cast(.decl_test, tree).?;
+
             try writeToken(builder, main_token, .keyword);
-            if (opt_name_token.unwrap()) |name_token| {
-                switch (tree.tokenTag(name_token)) {
-                    .string_literal => try writeToken(builder, name_token, .string),
-                    .identifier => try writeIdentifier(builder, name_token),
+            if (decl_test.name(tree)) |name_token| {
+                switch (name_token.tag(tree)) {
+                    .string => try writeToken(builder, name_token, .string),
+                    .name => try writeIdentifier(builder, name_token),
                     else => {},
                 }
             }
 
-            try writeNodeTokens(builder, block);
+            try writeNodeTokens(builder, decl_test.block.idx);
         },
-        .@"catch" => {
-            const lhs, const rhs = tree.nodeData(node).node_and_node;
-            try writeNodeTokens(builder, lhs);
+        .expr_catch => {
+            const expr: Ast.Expr.Catch = node.cast(.expr_catch, tree).?;
+            try writeNodeTokens(builder, expr.lhs.idx);
             try writeToken(builder, main_token, .keyword);
-            if (tree.tokenTag(main_token + 1) == .pipe) {
-                try writeTokenMod(builder, main_token + 2, .variable, .{ .declaration = true });
-            }
-            try writeNodeTokens(builder, rhs);
+            if (expr.payload) |payload| try writePayload(builder, payload.get(tree));
+            try writeNodeTokens(builder, expr.rhs.idx);
         },
-        .add,
-        .add_wrap,
-        .add_sat,
-        .array_cat,
-        .assign,
-        .assign_bit_and,
-        .assign_bit_or,
-        .assign_shl,
-        .assign_shl_sat,
-        .assign_shr,
-        .assign_bit_xor,
-        .assign_div,
-        .assign_sub,
-        .assign_sub_wrap,
-        .assign_sub_sat,
-        .assign_mod,
-        .assign_add,
-        .assign_add_wrap,
-        .assign_add_sat,
-        .assign_mul,
-        .assign_mul_wrap,
-        .assign_mul_sat,
-        .bang_equal,
-        .bit_and,
-        .bit_or,
-        .shl,
-        .shl_sat,
-        .shr,
-        .bit_xor,
-        .bool_and,
-        .bool_or,
-        .div,
-        .equal_equal,
-        .greater_or_equal,
-        .greater_than,
-        .less_or_equal,
-        .less_than,
-        .merge_error_sets,
-        .mod,
-        .mul,
-        .mul_wrap,
-        .mul_sat,
-        .sub,
-        .sub_wrap,
-        .sub_sat,
-        .@"orelse",
-        => |tag| {
-            const lhs, const rhs = tree.nodeData(node).node_and_node;
-            try writeNodeTokens(builder, lhs);
-            const token_type: TokenType = switch (tag) {
-                .bool_and, .bool_or, .@"orelse" => .keyword,
+        .expr_binary => {
+            const expr: Ast.Expr.Binary = node.cast(.expr_binary, tree).?;
+
+            try writeNodeTokens(builder, expr.lhs.idx);
+            const token_type: TokenType = switch (expr.op.get(tree)) {
+                .@"and", .@"or", .@"orelse" => .keyword,
                 else => .operator,
             };
 
             try writeToken(builder, main_token, token_type);
-            try writeNodeTokens(builder, rhs);
+            try writeNodeTokens(builder, expr.rhs.idx);
         },
-        .assign_destructure => {
-            const data = tree.assignDestructure(node);
+        .expr_destructure => {
+            const expr: Ast.Expr.Destructure = node.cast(.expr_destructure, tree).?;
 
-            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(data.ast.value_expr, handle));
+            const resolved_type = try builder.analyser.resolveTypeOfNode(.of(expr.init.idx, handle));
 
-            for (data.ast.variables, 0..) |lhs_node, index| {
-                switch (tree.nodeTag(lhs_node)) {
-                    .global_var_decl,
-                    .local_var_decl,
-                    .aligned_var_decl,
-                    .simple_var_decl,
-                    => {
-                        const field_type = if (resolved_type) |ty| try builder.analyser.resolveBracketAccessType(ty, .{ .single = index }) else null;
-                        try writeVarDecl(builder, lhs_node, field_type);
+            var index: u32 = 0;
+            var it = expr.lvalues.iter(tree);
+            while (it.next(tree)) |lvalue| : (index += 1) {
+                switch (lvalue.get(tree)) {
+                    .expr => |expr_node| try writeNodeTokens(builder, expr_node.idx),
+                    .var_proto => |var_proto| {
+                        const field_type = if (resolved_type) |ty|
+                            try builder.analyser.resolveBracketAccessType(ty, .{ .single = index })
+                        else
+                            null;
+                        try writeVarDecl(
+                            builder,
+                            ast.globalVarFromDestructureProto(var_proto, tree),
+                            false,
+                            field_type,
+                        );
                     },
-                    .identifier => {
-                        const name_token = tree.nodeMainToken(lhs_node);
-                        try writeIdentifier(builder, name_token);
-                    },
-                    else => {},
                 }
             }
 
             try writeToken(builder, main_token, .operator);
-            try writeNodeTokens(builder, data.ast.value_expr);
+            try writeNodeTokens(builder, expr.init.idx);
         },
-        .array_access,
-        .error_union,
-        .switch_range,
-        => {
-            const lhs, const rhs = tree.nodeData(node).node_and_node;
-            try writeNodeTokens(builder, lhs);
-            try writeNodeTokens(builder, rhs);
+        inline .expr_index, .type_error_union => |t| {
+            const expr = node.cast(t, tree).?;
+            try writeNodeTokens(builder, expr.lhs.idx);
+            try writeNodeTokens(builder, expr.rhs.idx);
         },
-        .for_range => {
-            const start, const opt_end = tree.nodeData(node).node_and_opt_node;
-            try writeNodeTokens(builder, start);
-            if (opt_end.unwrap()) |end| try writeNodeTokens(builder, end);
+        .expr_dot_access => {
+            try writeDotAccess(builder, node.cast(.expr_dot_access, tree).?);
         },
-        .identifier => {
-            std.debug.assert(main_token == (ast.identifierTokenFromIdentifierNode(tree, node) orelse return));
-            try writeIdentifier(builder, main_token);
-        },
-        .field_access => {
-            try writeFieldAccess(builder, node);
-        },
-        .ptr_type,
-        .ptr_type_aligned,
-        .ptr_type_bit_range,
-        .ptr_type_sentinel,
-        => {
-            const ptr_type = ast.fullPtrType(tree, node).?;
+        .type_pointer => {
+            const expr: Ast.Expr.Pointer = node.cast(.type_pointer, tree).?;
+            const attributes = expr.attributes(tree);
 
-            if (ptr_type.ast.sentinel.unwrap()) |sentinel| {
-                try writeNodeTokens(builder, sentinel);
+            if (expr.sentinel(tree)) |sentinel| {
+                try writeNodeTokens(builder, sentinel.idx);
             }
 
-            try writeToken(builder, ptr_type.allowzero_token, .keyword);
+            try writeToken(builder, attributes.@"allowzero", .keyword);
 
-            if (ptr_type.ast.align_node.unwrap()) |align_node| {
-                const first_tok = tree.firstToken(align_node);
-                try writeToken(builder, first_tok - 2, .keyword);
-                try writeNodeTokens(builder, align_node);
-
-                if (ptr_type.ast.bit_range_start.unwrap()) |bit_range_start| {
-                    const bit_range_end = ptr_type.ast.bit_range_end.unwrap().?;
-                    try writeNodeTokens(builder, bit_range_start);
-                    try writeNodeTokens(builder, bit_range_end);
+            if (attributes.@"align") |payload| {
+                switch (payload.get(tree)) {
+                    .expr => |align_expr| {
+                        const align_token = align_expr.idx.firstToken(tree).add(-2);
+                        try writeToken(builder, align_token, .keyword);
+                        try writeNodeTokens(builder, align_expr.idx);
+                    },
+                    .bitalign => |bitalign_idx| {
+                        const bitalign = bitalign_idx.get(tree);
+                        try writeNodeTokens(builder, bitalign.byte.idx);
+                        try writeNodeTokens(builder, bitalign.bit_start.idx);
+                        try writeNodeTokens(builder, bitalign.bit_end.idx);
+                    },
                 }
             }
 
-            try writeToken(builder, ptr_type.const_token, .keyword);
-            try writeToken(builder, ptr_type.volatile_token, .keyword);
+            try writeToken(builder, attributes.@"const", .keyword);
+            try writeToken(builder, attributes.@"volatile", .keyword);
 
-            try writeNodeTokens(builder, ptr_type.ast.child_type);
+            try writeNodeTokens(builder, expr.child_type.idx);
         },
-        .array_type,
-        .array_type_sentinel,
-        => {
-            const array_type: Ast.full.ArrayType = tree.fullArrayType(node).?;
-
-            try writeNodeTokens(builder, array_type.ast.elem_count);
-            if (array_type.ast.sentinel.unwrap()) |sentinel| try writeNodeTokens(builder, sentinel);
-            try writeNodeTokens(builder, array_type.ast.elem_type);
+        .type_array => {
+            const expr: Ast.Expr.Array = node.cast(.type_array, tree).?;
+            try writeNodeTokens(builder, expr.size.idx);
+            if (expr.sentinel) |sentinel| try writeNodeTokens(builder, sentinel.idx);
+            try writeNodeTokens(builder, expr.child_type.idx);
         },
-        .address_of,
-        .bit_not,
-        .bool_not,
-        .optional_type,
-        .negation,
-        .negation_wrap,
-        => {
-            try writeToken(builder, main_token, .operator);
-            try writeNodeTokens(builder, tree.nodeData(node).node);
+        .expr_prefix => {
+            const expr: Ast.Expr.Prefix = node.cast(.expr_prefix, tree).?;
+            const token_type: TokenType = switch (expr.op.get(tree)) {
+                .@"!", .@"-", .@"-%", .@"~", .@"&" => .operator,
+                .@"try" => .keyword,
+            };
+            try writeToken(builder, main_token, token_type);
+            try writeNodeTokens(builder, expr.rhs.idx);
         },
-        .@"try",
-        .@"resume",
-        => {
-            try writeToken(builder, main_token, .keyword);
-            try writeNodeTokens(builder, tree.nodeData(node).node);
-        },
-        .anyframe_literal => try writeToken(builder, main_token, .type),
     }
 }
 
-fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: Ast.Node.Index) Analyser.Error!void {
+fn writePayload(builder: *Builder, payload: Ast.Payload) Analyser.Error!void {
     const tree = &builder.handle.tree;
-
-    var container_field = tree.fullContainerField(node).?;
-    const field_token_type = fieldTokenType(container_decl, builder.handle, false) orelse .property;
-
-    if (container_decl != .root and tree.tokenTag(tree.nodeMainToken(container_decl)) != .keyword_struct) {
-        container_field.convertToNonTupleLike(tree);
-    }
-
-    try writeToken(builder, container_field.comptime_token, .keyword);
-    if (!container_field.ast.tuple_like) {
-        try writeTokenMod(builder, container_field.ast.main_token, field_token_type, .{ .declaration = true });
-    }
-
-    if (container_field.ast.type_expr.unwrap()) |type_expr| {
-        try writeNodeTokens(builder, type_expr);
-        if (container_field.ast.align_expr.unwrap()) |align_expr| {
-            try writeToken(builder, tree.firstToken(align_expr) - 2, .keyword);
-            try writeNodeTokens(builder, align_expr);
-        }
-    }
-
-    if (container_field.ast.value_expr.unwrap()) |value_expr| {
-        const equal_token = tree.firstToken(value_expr) - 1;
-        if (tree.tokenTag(equal_token) == .equal) {
-            try writeToken(builder, equal_token, .operator);
-        }
-        try writeNodeTokens(builder, value_expr);
+    var it = payload.bindings.iter(tree);
+    while (it.next(tree)) |binding| {
+        const binding_token = binding.get(tree).name(tree) orelse continue;
+        try writeTokenMod(builder, binding_token, .variable, .{ .declaration = true });
     }
 }
 
-fn writeVarDecl(builder: *Builder, var_decl_node: Ast.Node.Index, resolved_type: ?Analyser.Type) Analyser.Error!void {
+fn writeContainerField(
+    builder: *Builder,
+    container_field: Ast.Member.Field,
+    /// `null` means `.root`
+    container_decl: ?Ast.Expr.Container,
+) Analyser.Error!void {
     const tree = &builder.handle.tree;
+    const attributes = container_field.attributes(tree);
 
-    const var_decl = tree.fullVarDecl(var_decl_node).?;
-    try writeToken(builder, var_decl.visib_token, .keyword);
-    try writeToken(builder, var_decl.extern_export_token, .keyword);
-    try writeToken(builder, var_decl.lib_name, .string);
-    try writeToken(builder, var_decl.threadlocal_token, .keyword);
-    try writeToken(builder, var_decl.comptime_token, .keyword);
-    try writeToken(builder, var_decl.ast.mut_token, .keyword);
-
-    const decl: Analyser.DeclWithHandle = .{
-        .decl = .{ .ast_node = var_decl_node },
-        .handle = builder.handle,
+    const field_token_type: TokenType = token_type: {
+        const container = container_decl orelse
+            break :token_type .property; // .root is a struct
+        break :token_type switch (container.kind.get(tree)) {
+            .@"struct", .@"union" => .property,
+            .@"enum" => .enumMember,
+            .@"opaque" => .property, // opaque can't have fields but it's still syntactically valid
+        };
     };
 
-    const mutable = tree.tokenTag(var_decl.ast.mut_token) == .keyword_var;
-    if (resolved_type) |decl_type| {
-        try colorIdentifierBasedOnType(
-            builder,
-            decl_type,
-            var_decl.ast.mut_token + 1,
-            false,
-            .{
-                .declaration = true,
-                .static = !(decl_type.is_type_val or decl_type.isFunc()) and try decl.isStatic(),
-                .mutable = mutable,
-            },
-        );
-    } else {
-        try writeTokenMod(
-            builder,
-            var_decl.ast.mut_token + 1,
-            .variable,
-            .{
-                .declaration = true,
-                .static = try decl.isStatic(),
-                .mutable = mutable,
-            },
-        );
+    try writeToken(builder, attributes.@"comptime", .keyword);
+
+    if (container_field.name) |leaf_node| {
+        try writeTokenMod(builder, leaf_node.token(tree), field_token_type, .{ .declaration = true });
     }
 
-    if (var_decl.ast.type_node.unwrap()) |type_node| try writeNodeTokens(builder, type_node);
-    if (var_decl.ast.align_node.unwrap()) |align_node| {
-        try writeToken(builder, tree.firstToken(align_node) - 2, .keyword);
-        try writeNodeTokens(builder, align_node);
-    }
-    if (var_decl.ast.addrspace_node.unwrap()) |addrspace_node| {
-        try writeToken(builder, tree.firstToken(addrspace_node) - 2, .keyword);
-        try writeNodeTokens(builder, addrspace_node);
-    }
-    if (var_decl.ast.section_node.unwrap()) |section_node| {
-        try writeToken(builder, tree.firstToken(section_node) - 2, .keyword);
-        try writeNodeTokens(builder, section_node);
+    try writeNodeTokens(builder, container_field.type.idx);
+
+    if (container_field.@"align") |align_expr| {
+        try writeToken(builder, align_expr.idx.firstToken(tree).add(-2), .keyword);
+        try writeNodeTokens(builder, align_expr.idx);
     }
 
-    if (var_decl.ast.init_node.unwrap()) |init_node| {
-        const equal_token = tree.firstToken(init_node) - 1;
-        if (tree.tokenTag(equal_token) == .equal) {
+    if (container_field.init) |value_expr| {
+        const equal_token = value_expr.idx.firstToken(tree).add(-1);
+        if (equal_token.tag(tree) == .@"=") {
             try writeToken(builder, equal_token, .operator);
         }
-        try writeNodeTokens(builder, init_node);
+        try writeNodeTokens(builder, value_expr.idx);
     }
 }
 
-fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) Analyser.Error!void {
+fn writeVarDecl(
+    builder: *Builder,
+    var_decl: Ast.Member.GlobalVar,
+    is_global: bool,
+    resolved_type: ?Analyser.Type,
+) Analyser.Error!void {
+    const tree = &builder.handle.tree;
+
+    const attributes = var_decl.attributes(tree);
+
+    try writeToken(builder, attributes.@"pub", .keyword);
+    try writeToken(builder, attributes.@"export", .keyword);
+    if (attributes.@"extern") |@"extern"| {
+        try writeToken(builder, @"extern".@"extern", .keyword);
+        try writeToken(builder, @"extern".string, .keyword);
+    }
+    try writeToken(builder, attributes.@"threadlocal", .keyword);
+
+    // BRANCH_TODO
+    // const decl: Analyser.DeclWithHandle = .{
+    //     .decl = .{ .ast_node = var_decl },
+    //     .handle = builder.handle,
+    // };
+    // const is_static = try decl.isStatic();
+    const is_static = is_global;
+
+    const is_mutable = switch (var_decl.mutability.get(tree)) {
+        .@"const" => false,
+        .@"var" => true,
+    };
+
+    if (var_decl.name(tree)) |name_token| {
+        if (resolved_type) |decl_type| {
+            try colorIdentifierBasedOnType(
+                builder,
+                decl_type,
+                name_token,
+                false,
+                .{
+                    .declaration = true,
+                    .static = !(decl_type.is_type_val or decl_type.isFunc()) and is_static,
+                    .mutable = is_mutable,
+                },
+            );
+        } else {
+            try writeTokenMod(
+                builder,
+                name_token,
+                .variable,
+                .{
+                    .declaration = true,
+                    .static = is_static,
+                    .mutable = is_mutable,
+                },
+            );
+        }
+    }
+
+    if (var_decl.type) |type_expr| try writeNodeTokens(builder, type_expr.idx);
+    if (attributes.@"align") |align_expr| {
+        try writeToken(builder, align_expr.idx.firstToken(tree).add(-2), .keyword);
+        try writeNodeTokens(builder, align_expr.idx);
+    }
+    if (attributes.@"addrspace") |addrspace_expr| {
+        try writeToken(builder, addrspace_expr.idx.firstToken(tree).add(-2), .keyword);
+        try writeNodeTokens(builder, addrspace_expr.idx);
+    }
+    if (attributes.@"linksection") |linksection_expr| {
+        try writeToken(builder, linksection_expr.idx.firstToken(tree).add(-2), .keyword);
+        try writeNodeTokens(builder, linksection_expr.idx);
+    }
+
+    if (var_decl.init) |init_expr| {
+        const equal_token = init_expr.idx.firstToken(tree).add(-1);
+        if (equal_token.tag(tree) == .@"=") {
+            try writeToken(builder, equal_token, .operator);
+        }
+        try writeNodeTokens(builder, init_expr.idx);
+    }
+}
+
+fn writeIdentifier(builder: *Builder, name_token: Ast.Token.Index) Analyser.Error!void {
     const handle = builder.handle;
     const tree = &handle.tree;
 
     const name = offsets.identifierTokenToNameSlice(tree, name_token);
-    const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+    const is_escaped_identifier = tree.source[name_token.byteOffset(tree)] == '@';
 
     if (!is_escaped_identifier) {
         if (std.mem.eql(u8, name, "_")) return;
@@ -1095,7 +1000,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) Analyser.Error
     if (try builder.analyser.lookupSymbolGlobal(
         handle,
         name,
-        tree.tokenStart(name_token),
+        name_token.byteOffset(tree),
     )) |child| {
         const is_param = child.decl == .function_parameter;
         const mutable = !child.isConst();
@@ -1126,16 +1031,16 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.TokenIndex) Analyser.Error
     }
 }
 
-fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void {
+fn writeDotAccess(builder: *Builder, node: Ast.Expr.DotAccess) Analyser.Error!void {
     const handle = builder.handle;
     const tree = &builder.handle.tree;
-    const lhs_node, const field_name_token = tree.nodeData(node).node_and_token;
 
+    const field_name_token = node.rhs.token(tree);
     const symbol_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
 
-    try writeNodeTokens(builder, lhs_node);
+    try writeNodeTokens(builder, node.lhs.idx);
 
-    const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse {
+    const lhs = try builder.analyser.resolveTypeOfNode(.of(node.lhs.idx, handle)) orelse {
         try writeToken(builder, field_name_token, .variable);
         return;
     };
@@ -1150,14 +1055,21 @@ fn writeFieldAccess(builder: *Builder, node: Ast.Node.Index) Analyser.Error!void
         field_blk: {
             if (decl_type.decl != .ast_node) break :field_blk;
             const decl_node = decl_type.decl.ast_node;
-            if (!decl_type.handle.tree.nodeTag(decl_node).isContainerField()) break :field_blk;
-            if (lhs_type.data != .container) break :field_blk;
-            const scope_handle = lhs_type.data.container.scope_handle;
-            const field_token_type = fieldTokenType(
-                scope_handle.toNode(),
-                scope_handle.handle,
-                lhs_type.is_type_val,
-            ).?;
+            if (decl_node.cast(.field, tree) == null) break :field_blk;
+
+            const scope_handle = switch (lhs_type.data) {
+                .container => |info| info.scope_handle,
+                else => break :field_blk,
+            };
+            const container = scope_handle.toNode().cast(.type_container, &scope_handle.handle.tree).?;
+
+            const field_token_type: TokenType = if (lhs_type.is_type_val and ast.isTaggedUnion(tree, container))
+                .enumMember
+            else switch (container.kind.get(tree)) {
+                .@"struct", .@"union" => .property,
+                .@"enum" => .enumMember,
+                .@"opaque" => .property, // opaque can't have fields but it's still syntactically valid
+            };
 
             try writeTokenMod(builder, field_name_token, field_token_type, .{});
             return;
@@ -1228,8 +1140,9 @@ fn semanticTokens(
     };
 
     // reverse the ast from the root declarations
-    for (handle.tree.rootDecls()) |child| {
-        try writeNodeTokens(&builder, child);
+    var root_it = handle.tree.root().members.iter(&handle.tree);
+    while (root_it.next(&handle.tree)) |child| {
+        try writeNodeTokens(&builder, child.idx);
     }
 
     return try builder.finish();

@@ -7,7 +7,7 @@ const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.store);
 const lsp = @import("lsp");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const tracy = @import("tracy");
 const DocumentScope = @import("DocumentScope.zig");
@@ -448,21 +448,7 @@ pub const Handle = struct {
         const tracy_zone = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone.end();
 
-        var tree = try Ast.parse(allocator, new_text, .{
-            .mode = mode,
-        });
-        errdefer tree.deinit(allocator);
-
-        // remove unused capacity
-        var nodes = tree.nodes.toMultiArrayList();
-        try nodes.setCapacity(allocator, nodes.len);
-        tree.nodes = nodes.slice();
-
-        // remove unused capacity
-        var tokens = tree.tokens.toMultiArrayList();
-        try tokens.setCapacity(allocator, tokens.len);
-        tree.tokens = tokens.slice();
-        return tree;
+        return .parse(allocator, new_text, .{ .mode = mode });
     }
 
     fn collectImports(
@@ -476,29 +462,21 @@ pub const Handle = struct {
 
         const parsed_uri = uri.toStdUri();
 
-        const node_tags = tree.nodes.items(.tag);
-        for (node_tags, 0..) |tag, i| {
+        for (tree.nodes.tag, 0..) |tag, i| {
             const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
 
-            switch (tag) {
-                .builtin_call,
-                .builtin_call_comma,
-                .builtin_call_two,
-                .builtin_call_two_comma,
-                => {},
-                else => continue,
-            }
-            const name = offsets.tokenToSlice(tree, tree.nodeMainToken(node));
+            if (tag != .expr_builtin_call) continue;
+
+            const name = offsets.tokenToSlice(tree, node.mainToken(tree));
 
             if (std.mem.eql(u8, name, "@import")) {
                 try file_imports.ensureUnusedCapacity(allocator, 1);
 
-                var buffer: [2]Ast.Node.Index = undefined;
-                const params = tree.builtinCallParams(&buffer, node).?;
-                if (params.len < 1) continue;
-                if (tree.nodeTag(params[0]) != .string_literal) continue;
+                var arg_it = node.toTyped(tree).expr_builtin_call.args.iter(tree);
+                const first_arg_node = arg_it.next(tree) orelse continue;
+                const import_string_node = first_arg_node.cast(.string, tree) orelse continue;
 
-                var import_string = offsets.tokenToSlice(tree, tree.nodeMainToken(params[0]));
+                var import_string = offsets.tokenToSlice(tree, import_string_node.token(tree));
                 import_string = import_string[1 .. import_string.len - 1];
 
                 if (!std.mem.endsWith(u8, import_string, ".zig")) continue;

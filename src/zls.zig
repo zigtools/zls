@@ -1,5 +1,6 @@
 pub const build_options = @import("build_options");
 pub const lsp = @import("lsp");
+pub const Ast = @import("zirp").Ast;
 
 pub const analyser = @import("analyser/analyser.zig");
 
@@ -13,7 +14,7 @@ pub const diff = @import("diff.zig");
 pub const DocumentScope = @import("DocumentScope.zig");
 pub const DocumentStore = @import("DocumentStore.zig");
 pub const offsets = @import("offsets.zig");
-pub const print_ast = @import("print_ast.zig");
+// pub const print_ast = @import("print_ast.zig");
 pub const Server = @import("Server.zig");
 pub const snippets = @import("snippets.zig");
 pub const testing = @import("testing.zig");

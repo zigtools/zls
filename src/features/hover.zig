@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/hover`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_hover)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const ast = @import("../ast.zig");
 const types = @import("lsp").types;
@@ -51,34 +51,13 @@ fn hoverSymbolWithType(
 
     const tree = &decl_handle.handle.tree;
     const def_str = switch (decl_handle.decl) {
-        .ast_node => |node| switch (tree.nodeTag(node)) {
-            .global_var_decl,
-            .local_var_decl,
-            .aligned_var_decl,
-            .simple_var_decl,
-            => try Analyser.getVariableSignature(
-                arena,
-                tree,
-                tree.fullVarDecl(node).?,
-                true,
-            ),
-            .container_field,
-            .container_field_init,
-            .container_field_align,
-            => offsets.nodeToSlice(tree, node),
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => def: {
-                var buf: [1]Ast.Node.Index = undefined;
-                const fn_proto = tree.fullFnProto(&buf, node).?;
-                break :def Analyser.getFunctionSignature(tree, fn_proto);
-            },
-            else => unreachable,
+        .ast_node => |node| switch (node.get(tree)) {
+            .var_local => |var_idx| try Analyser.getVariableSignature(arena, tree, ast.globalVarFromLocal(var_idx, tree), true),
+            .var_global => |var_idx| try Analyser.getVariableSignature(arena, tree, var_idx.get(tree), true),
+            .field => |field_member| offsets.nodeToSlice(tree, field_member.idx),
+            inline .type_fn, .decl_fn => |fn_idx| offsets.nodeToSlice(tree, fn_idx.idx),
         },
-        .function_parameter => |payload| ast.paramSlice(tree, payload.get(tree).?, false),
+        .function_parameter => |payload| offsets.nodeToSlice(tree, payload.node.idx),
         .optional_payload,
         .error_union_payload,
         .error_union_error,
@@ -88,7 +67,7 @@ fn hoverSymbolWithType(
         .switch_inline_tag_payload,
         .label,
         .error_token,
-        => tree.tokenSlice(decl_handle.nameToken()),
+        => decl_handle.nameToken().slice(tree),
     };
 
     return try hoverSymbolResolvedType(
@@ -172,7 +151,7 @@ fn hoverSymbolResolved(
         for (referenced_types, 0..) |ref, index| {
             if (index > 0)
                 try output.print(arena, " | ", .{});
-            const source_index = ref.handle.tree.tokenStart(ref.token);
+            const source_index = ref.token.byteOffset(&ref.handle.tree);
             const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
             try output.print(arena, "[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri.raw, line });
         }
@@ -289,7 +268,7 @@ fn hoverDefinitionGlobal(
     const name_token, const name_loc = offsets.identifierTokenAndLocFromIndex(&handle.tree, pos_index) orelse return null;
     const name = offsets.locToSlice(handle.tree.source, name_loc);
     const hover_text = blk: {
-        const is_escaped_identifier = handle.tree.source[handle.tree.tokenStart(name_token)] == '@';
+        const is_escaped_identifier = handle.tree.source[name_token.byteOffset(&handle.tree)] == '@';
         if (!is_escaped_identifier) {
             if (std.mem.eql(u8, name, "_")) return null;
             if (try analyser.resolvePrimitive(name)) |ip_index| {
@@ -323,9 +302,9 @@ fn hoverDefinitionStructInit(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{.period}, &handle.tree) orelse return null;
-    if (token + 1 >= handle.tree.tokens.len) return null;
-    if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
+    const token = offsets.sourceIndexToTokenIndex(&handle.tree, source_index).pickPreferred(&.{.@"."}, &handle.tree) orelse return null;
+    if (@backingInt(token.add(1)) >= handle.tree.tokens.len()) return null;
+    if (token.add(1).tag(&handle.tree) != .@"{") return null;
 
     const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
 
@@ -421,16 +400,16 @@ fn hoverDefinitionFieldAccess(
 
 fn hoverNumberLiteral(
     handle: *DocumentStore.Handle,
-    token_index: Ast.TokenIndex,
+    token_index: Ast.Token.Index,
     arena: std.mem.Allocator,
     markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?[]const u8 {
     const tree = &handle.tree;
     // number literals get tokenized separately from their minus sign
-    const is_negative = tree.tokenTag(token_index -| 1) == .minus;
-    const num_slice = tree.tokenSlice(token_index);
+    const is_negative = token_index.addClamp(-1).tag(tree) == .@"-";
+    const num_slice = token_index.slice(tree);
     const number = blk: {
-        if (tree.tokenTag(token_index) == .char_literal) {
+        if (token_index.tag(tree) == .char) {
             switch (std.zig.parseCharLiteral(num_slice)) {
                 .success => |value| break :blk value,
                 else => return null,
@@ -480,7 +459,7 @@ fn hoverDefinitionNumberLiteral(
     defer tracy_zone.end();
 
     const tree = &handle.tree;
-    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .number_literal, .char_literal }, tree) orelse return null;
+    const token_index = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .number, .char }, tree) orelse return null;
     const num_loc = offsets.tokenToLoc(tree, token_index);
     const hover_text = (try hoverNumberLiteral(handle, token_index, arena, markup_kind)) orelse return null;
 

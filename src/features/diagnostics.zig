@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 const log = std.log.scoped(.diag);
 
 const Server = @import("../Server.zig");
@@ -94,58 +94,29 @@ fn collectParseDiagnostics(tree: *const Ast, eb: *std.zig.ErrorBundle.Wip) error
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (tree.errors.len == 0) return;
+    for (tree.errors) |err| {
+        const err_token = err.token.get(tree);
 
-    const allocator = eb.gpa;
+        const msg = switch (err.tag) {
+            .unexpected_token => try eb.printString("unexpected token {}", .{err_token.tag}),
+            .expected => |tok| try eb.printString("expected token {f}", .{tok}),
+        };
 
-    var aw: std.Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-
-    var notes: std.ArrayList(std.zig.ErrorBundle.MessageIndex) = .empty;
-    defer notes.deinit(allocator);
-
-    const current_error = tree.errors[0];
-    for (tree.errors[1..]) |err| {
-        if (!err.is_note) break;
-
-        aw.clearRetainingCapacity();
-        tree.renderError(err, &aw.writer) catch return error.OutOfMemory;
-        try notes.append(allocator, try eb.addErrorMessage(.{
-            .msg = try eb.addString(aw.written()),
-            .src_loc = try errorBundleSourceLocationFromToken(tree, eb, err.token),
-        }));
+        const pos = offsets.indexToPosition(tree.source, err_token.offset, .@"utf-8");
+        const line = offsets.lineSliceAtIndex(tree.source, err_token.offset);
+        try eb.addRootErrorMessage(.{
+            .msg = msg,
+            .src_loc = try eb.addSourceLocation(.{
+                .src_path = try eb.addString(""),
+                .line = pos.line,
+                .column = pos.character,
+                .span_start = err_token.offset,
+                .span_main = err_token.offset,
+                .span_end = err_token.offset,
+                .source_line = try eb.addString(line),
+            }),
+        });
     }
-
-    aw.clearRetainingCapacity();
-    tree.renderError(current_error, &aw.writer) catch return error.OutOfMemory;
-    try eb.addRootErrorMessage(.{
-        .msg = try eb.addString(aw.written()),
-        .src_loc = try errorBundleSourceLocationFromToken(tree, eb, current_error.token),
-        .notes_len = @intCast(notes.items.len),
-    });
-
-    const notes_start = try eb.reserveNotes(@intCast(notes.items.len));
-    @memcpy(eb.extra.items[notes_start..][0..notes.items.len], @as([]const u32, @ptrCast(notes.items)));
-}
-
-fn errorBundleSourceLocationFromToken(
-    tree: *const Ast,
-    eb: *std.zig.ErrorBundle.Wip,
-    token: Ast.TokenIndex,
-) error{OutOfMemory}!std.zig.ErrorBundle.SourceLocationIndex {
-    const loc = offsets.tokenToLoc(tree, token);
-    const pos = offsets.indexToPosition(tree.source, loc.start, .@"utf-8");
-    const line = offsets.lineSliceAtIndex(tree.source, loc.start);
-
-    return try eb.addSourceLocation(.{
-        .src_path = try eb.addString(""),
-        .line = pos.line,
-        .column = pos.character,
-        .span_start = @intCast(loc.start),
-        .span_main = @intCast(loc.start),
-        .span_end = @intCast(loc.end),
-        .source_line = try eb.addString(line),
-    });
 }
 
 fn collectWarnStyleDiagnostics(
@@ -157,73 +128,70 @@ fn collectWarnStyleDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    for (0..tree.nodes.len) |i| {
+    for (0..tree.nodes.len()) |i| {
         const node: Ast.Node.Index = @fromBackingInt(@intCast(i));
-        if (ast.isBuiltinCall(tree, node)) {
-            const builtin_token = tree.nodeMainToken(node);
-            const call_name = tree.tokenSlice(builtin_token);
+        const builtin_call: Ast.Expr.Builtin = node.cast(.expr_builtin_call, tree) orelse continue;
 
-            if (!std.mem.eql(u8, call_name, "@import")) continue;
+        const builtin_token = builtin_call.callee.token(tree);
+        const call_name = builtin_token.slice(tree);
 
-            var buffer: [2]Ast.Node.Index = undefined;
-            const params = tree.builtinCallParams(&buffer, node).?;
+        if (!std.mem.eql(u8, call_name, "@import")) continue;
 
-            if (params.len != 1) continue;
+        var it = builtin_call.args.iter(tree);
 
-            const import_str_token = tree.nodeMainToken(params[0]);
-            const import_str = tree.tokenSlice(import_str_token);
+        const first_arg = it.next(tree) orelse continue;
+        if (it.next(tree) != null) continue;
 
-            if (std.mem.startsWith(u8, import_str, "\"./")) {
-                try diagnostics.append(arena, .{
-                    .range = offsets.tokenToRange(tree, import_str_token, offset_encoding),
-                    .severity = .Hint,
-                    .code = .{ .string = "dot_slash_import" },
-                    .source = "zls",
-                    .message = .{ .string = "A ./ is not needed in imports" },
-                });
-            }
+        const import_string_node = first_arg.cast(.string, tree) orelse continue;
+        const import_str_token = import_string_node.token(tree);
+        const import_str = import_str_token.slice(tree);
+
+        if (std.mem.startsWith(u8, import_str, "\"./")) {
+            try diagnostics.append(arena, .{
+                .range = offsets.tokenToRange(tree, import_str_token, offset_encoding),
+                .severity = .Hint,
+                .code = .{ .string = "dot_slash_import" },
+                .source = "zls",
+                .message = .{ .string = "A ./ is not needed in imports" },
+            });
         }
     }
 
     // TODO: style warnings for types, values and declarations below root scope
     if (tree.errors.len == 0) {
-        for (tree.rootDecls()) |decl_idx| {
-            const decl = tree.nodeTag(decl_idx);
-            switch (decl) {
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => blk: {
-                    var buf: [1]Ast.Node.Index = undefined;
-                    const func = tree.fullFnProto(&buf, decl_idx).?;
-                    if (func.extern_export_inline_token != null) break :blk;
+        const root_members = tree.root().members;
+        var it = root_members.iter(tree);
+        while (it.next(tree)) |member| {
+            const member_fn = member.cast(.@"fn", tree) orelse continue;
+            const fn_decl = member_fn.get(tree);
+            const fn_proto = fn_decl.proto.get(tree);
 
-                    if (func.name_token) |name_token| {
-                        const is_type_function = Analyser.isTypeFunction(tree, func);
+            const name_token = fn_proto.name(tree) orelse continue;
 
-                        const func_name = tree.tokenSlice(name_token);
-                        if (!is_type_function and !isCamelCase(func_name)) {
-                            try diagnostics.append(arena, .{
-                                .range = offsets.tokenToRange(tree, name_token, offset_encoding),
-                                .severity = .Hint,
-                                .code = .{ .string = "bad_style" },
-                                .source = "zls",
-                                .message = .{ .string = "Functions should be camelCase" },
-                            });
-                        } else if (is_type_function and !isPascalCase(func_name)) {
-                            try diagnostics.append(arena, .{
-                                .range = offsets.tokenToRange(tree, name_token, offset_encoding),
-                                .severity = .Hint,
-                                .code = .{ .string = "bad_style" },
-                                .source = "zls",
-                                .message = .{ .string = "Type functions should be PascalCase" },
-                            });
-                        }
-                    }
-                },
-                else => {},
+            const fn_attributes = fn_decl.attributes(tree);
+            if (fn_attributes.@"extern" != null) continue;
+            if (fn_attributes.@"export" != null) continue;
+            if (fn_attributes.@"inline" != null) continue;
+
+            const is_type_function = Analyser.isTypeFunction(tree, fn_proto);
+
+            const func_name = name_token.slice(tree);
+            if (!is_type_function and !isCamelCase(func_name)) {
+                try diagnostics.append(arena, .{
+                    .range = offsets.tokenToRange(tree, name_token, offset_encoding),
+                    .severity = .Hint,
+                    .code = .{ .string = "bad_style" },
+                    .source = "zls",
+                    .message = .{ .string = "Functions should be camelCase" },
+                });
+            } else if (is_type_function and !isPascalCase(func_name)) {
+                try diagnostics.append(arena, .{
+                    .range = offsets.tokenToRange(tree, name_token, offset_encoding),
+                    .severity = .Hint,
+                    .code = .{ .string = "bad_style" },
+                    .source = "zls",
+                    .message = .{ .string = "Type functions should be PascalCase" },
+                });
             }
         }
     }
@@ -250,17 +218,14 @@ fn collectGlobalVarDiagnostics(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    for (tree.rootDecls()) |decl| {
-        const decl_tag = tree.nodeTag(decl);
-        const decl_main_token = tree.nodeMainToken(decl);
+    const root_members = tree.root().members;
+    var it = root_members.iter(tree);
 
-        switch (decl_tag) {
-            .simple_var_decl,
-            .aligned_var_decl,
-            .local_var_decl,
-            .global_var_decl,
-            => {
-                if (tree.tokenTag(tree.nodeMainToken(decl)) != .keyword_var) continue; // skip anything immutable
+    while (it.next(tree)) |decl| {
+        switch (decl.idx.tag(tree)) {
+            .var_local, .var_global => {
+                const decl_main_token = decl.idx.mainToken(tree);
+                if (decl_main_token.tag(tree) != .@"var") continue; // skip anything immutable
                 // uncomment this to get a list :)
                 //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
                 try diagnostics.append(arena, .{
@@ -303,6 +268,7 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
         };
     } else switch (handle.tree.mode) {
         .zig => {
+            if (true) @panic("BRANCH_TODO");
             var zir = try std.zig.AstGen.generate(server.allocator, handle.tree);
             defer zir.deinit(server.allocator);
 
@@ -314,6 +280,7 @@ pub fn getAstCheckDiagnostics(server: *Server, handle: *DocumentStore.Handle) er
             return try eb.toOwnedBundle("");
         },
         .zon => {
+            if (true) @panic("BRANCH_TODO");
             const zoir = try std.zig.ZonGen.generate(server.allocator, handle.tree, .{});
             defer zoir.deinit(server.allocator);
 

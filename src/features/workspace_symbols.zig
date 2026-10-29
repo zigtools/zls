@@ -3,6 +3,7 @@
 const std = @import("std");
 
 const types = @import("lsp").types;
+const Ast = @import("zirp").Ast;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const offsets = @import("../offsets.zig");
@@ -39,9 +40,9 @@ pub fn @"workspace/symbol"(
         try trigram_store.declarationsForQuery(arena, request.query, &declaration_buffer);
 
         const SortContext = struct {
-            names: []const std.zig.Ast.TokenIndex,
+            names: []const Ast.Token.Index,
             fn lessThan(ctx: @This(), lhs: TrigramStore.Declaration.Index, rhs: TrigramStore.Declaration.Index) bool {
-                return ctx.names[@backingInt(lhs)] < ctx.names[@backingInt(rhs)];
+                return @backingInt(ctx.names[@backingInt(lhs)]) < @backingInt(ctx.names[@backingInt(rhs)]);
             }
         };
 

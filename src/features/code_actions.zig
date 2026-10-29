@@ -1,8 +1,8 @@
 //! Implementation of [`textDocument/codeAction`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_codeAction)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
-const Token = std.zig.Token;
+const Ast = @import("zirp").Ast;
+const Token = Ast.Token;
 
 const DocumentStore = @import("../DocumentStore.zig");
 const DocumentScope = @import("../DocumentScope.zig");
@@ -154,17 +154,17 @@ pub const Builder = struct {
         const ctx = try Analyser.getPositionContext(builder.arena, tree, source_index, true);
         if (ctx != .string_literal) return;
 
-        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string_literal, .multiline_string_literal_line }, tree) orelse return;
+        var token_idx = offsets.sourceIndexToTokenIndex(tree, source_index).pickPreferred(&.{ .string, .multiline_string_line }, tree) orelse return;
 
         // if `offsets.sourceIndexToTokenIndex` is called with a source index between two tokens, it will be the token to the right.
-        switch (tree.tokenTag(token_idx)) {
-            .string_literal, .multiline_string_literal_line => {},
-            else => token_idx -|= 1,
+        switch (token_idx.tag(tree)) {
+            .string, .multiline_string_line => {},
+            else => token_idx = token_idx.add(-1),
         }
 
-        switch (tree.tokenTag(token_idx)) {
-            .multiline_string_literal_line => try generateMultilineStringCodeActions(builder, token_idx),
-            .string_literal => try generateStringLiteralCodeActions(builder, token_idx),
+        switch (token_idx.tag(tree)) {
+            .multiline_string_line => try generateMultilineStringCodeActions(builder, token_idx),
+            .string => try generateStringLiteralCodeActions(builder, token_idx),
             else => {},
         }
     }
@@ -189,7 +189,7 @@ pub const Builder = struct {
 
 fn generateStringLiteralCodeActions(
     builder: *Builder,
-    token: Ast.TokenIndex,
+    token: Ast.Token.Index,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -197,9 +197,9 @@ fn generateStringLiteralCodeActions(
     if (!builder.wantKind(.refactor)) return;
 
     const tree = &builder.handle.tree;
-    switch (tree.tokenTag(token -| 1)) {
+    switch (token.add(-1).tag(tree)) {
         // Not covered by position context
-        .keyword_test, .keyword_extern => return,
+        .@"test", .@"extern" => return,
         else => {},
     }
 
@@ -232,7 +232,7 @@ fn generateStringLiteralCodeActions(
 
 fn generateMultilineStringCodeActions(
     builder: *Builder,
-    token: Ast.TokenIndex,
+    token: Ast.Token.Index,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -240,18 +240,22 @@ fn generateMultilineStringCodeActions(
     if (!builder.wantKind(.refactor)) return;
 
     const tree = &builder.handle.tree;
-    std.debug.assert(.multiline_string_literal_line == tree.tokenTag(token));
+    std.debug.assert(token.tag(tree) == .multiline_string_line);
     // Collect (exclusive) token range of the literal (one token per literal line)
-    const start = if (std.mem.findLastNone(Token.Tag, tree.tokens.items(.tag)[0..(token + 1)], &.{.multiline_string_literal_line})) |i| i + 1 else 0;
-    const end = std.mem.findNonePos(Token.Tag, tree.tokens.items(.tag), token, &.{.multiline_string_literal_line}) orelse tree.tokens.len;
+
+    const start_index = if (std.mem.findLastNone(Token.Tag, tree.tokens.tag[0..@backingInt(token.add(1))], &.{.multiline_string_line})) |i| i + 1 else 0;
+    const end_index = std.mem.findNonePos(Token.Tag, tree.tokens.tag, @backingInt(token), &.{.multiline_string_line}) orelse tree.tokens.len();
+    const start_token: Ast.Token.Index = @fromBackingInt(@intCast(start_index));
+    const end_token: Ast.Token.Index = @fromBackingInt(@intCast(end_index));
 
     // collect the text in the literal
-    const loc = offsets.tokensToLoc(tree, @intCast(start), @intCast(end));
+    const loc = offsets.tokensToLoc(tree, start_token, end_token);
     var str_escaped: std.ArrayList(u8) = try .initCapacity(builder.arena, 2 * (loc.end - loc.start));
     str_escaped.appendAssumeCapacity('"');
-    for (start..end) |i| {
-        std.debug.assert(tree.tokenTag(@intCast(i)) == .multiline_string_literal_line);
-        const string_part = offsets.tokenToSlice(tree, @intCast(i));
+    for (start_index..end_index) |i| {
+        const string_token: Ast.Token.Index = @fromBackingInt(@intCast(i));
+        std.debug.assert(token.tag(tree) == .multiline_string_line);
+        const string_part = offsets.tokenToSlice(tree, string_token);
         // Iterate without the leading \\
         for (string_part[2..]) |c| {
             const chunk = switch (c) {
@@ -263,7 +267,7 @@ fn generateMultilineStringCodeActions(
             };
             str_escaped.appendSliceAssumeCapacity(chunk);
         }
-        if (i != end - 1) {
+        if (i != end_index - 1) {
             str_escaped.appendSliceAssumeCapacity("\\n");
         }
     }
@@ -271,11 +275,11 @@ fn generateMultilineStringCodeActions(
 
     // Get Loc of the whole literal to delete it
     // Multiline string literal ends before the \n or \r, but it must be deleted too
-    const first_token_start = tree.tokenStart(@intCast(start));
+    const first_token_start = start_token.byteOffset(tree);
     const last_token_end = std.mem.findNonePos(
         u8,
         tree.source,
-        offsets.tokenToLoc(tree, @intCast(end - 1)).end + 1,
+        offsets.tokenToLoc(tree, end_token.add(-1)).end + 1,
         "\n\r",
     ) orelse tree.source.len;
     const remove_loc: offsets.Loc = .{ .start = first_token_start, .end = last_token_end };
@@ -303,22 +307,22 @@ pub fn collectAutoDiscardDiagnostics(
     // _ = some_identifier; // autofix
 
     var i: usize = 0;
-    while (i < tree.tokens.len) {
-        const first_token: Ast.TokenIndex = @intCast(std.mem.findPos(
+    while (i < tree.tokens.len()) {
+        const first_token: Ast.Token.Index = @fromBackingInt(@intCast(std.mem.findPos(
             Token.Tag,
-            tree.tokens.items(.tag),
+            tree.tokens.tag,
             i,
-            &.{ .identifier, .equal, .identifier, .semicolon },
-        ) orelse break);
-        defer i = first_token + 4;
+            &.{ .name, .@"=", .name, .@";" },
+        ) orelse break));
+        defer i = @backingInt(first_token.add(4));
 
         const underscore_token = first_token;
-        const identifier_token = first_token + 2;
-        const semicolon_token = first_token + 3;
+        const identifier_token = first_token.add(2);
+        const semicolon_token = first_token.add(3);
 
         if (!std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) continue;
 
-        const autofix_comment_start = std.mem.findNonePos(u8, tree.source, tree.tokenStart(semicolon_token) + 1, " ") orelse continue;
+        const autofix_comment_start = std.mem.findNonePos(u8, tree.source, semicolon_token.byteOffset(tree) + 1, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) continue;
         const autofix_str_start = std.mem.findNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse continue;
         if (!std.mem.startsWith(u8, tree.source[autofix_str_start..], "autofix")) continue;
@@ -327,7 +331,7 @@ pub fn collectAutoDiscardDiagnostics(
             const decl = (try analyser.lookupSymbolGlobal(
                 handle,
                 offsets.tokenToSlice(tree, identifier_token),
-                tree.tokenStart(identifier_token),
+                identifier_token.byteOffset(tree),
             )) orelse break :blk &.{};
             const range = offsets.tokenToRange(tree, decl.nameToken(), offset_encoding);
             break :blk try arena.dupe(types.Diagnostic.RelatedInformation, &.{.{
@@ -377,7 +381,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutO
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const tree = &builder.handle.tree;
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, tree) orelse return;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.name, tree) orelse return;
     const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
     const identifier_full_name = offsets.tokenToSlice(tree, identifier_token);
 
@@ -392,9 +396,9 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutO
         else => return,
     };
 
-    std.debug.assert(tree.nodeTag(payload.func) == .fn_decl);
-
-    const block = tree.nodeData(payload.func).node_and_node[1];
+    const decl_fn: Ast.Member.Fn = payload.func.cast(.decl_fn, tree) orelse return;
+    const block_idx = decl_fn.body orelse return;
+    const block = block_idx.get(tree);
 
     // If we are on the "last parameter" that requires a discard, then we need to append a newline,
     // as well as any relevant indentations, such that the next line is indented to the same column.
@@ -407,17 +411,16 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutO
     //     c: i32,
     // ) void { ... }
     // We have to be able to detect both cases.
-    const fn_proto_param = payload.get(tree).?;
-    const last_param_token = ast.paramLastToken(tree, fn_proto_param);
+    const last_param_token = payload.node.idx.lastToken(tree);
 
-    const potential_comma_token = last_param_token + 1;
-    const found_comma = potential_comma_token < tree.tokens.len and tree.tokenTag(potential_comma_token) == .comma;
+    const potential_comma_token = last_param_token.add(1);
+    const found_comma = @backingInt(potential_comma_token) < tree.tokens.len() and potential_comma_token.tag(tree) == .@",";
 
-    const potential_r_paren_token = potential_comma_token + @intFromBool(found_comma);
-    const is_last_param = potential_r_paren_token < tree.tokens.len and tree.tokenTag(potential_r_paren_token) == .r_paren;
+    const potential_r_paren_token = potential_comma_token.add(@intFromBool(found_comma));
+    const is_last_param = @backingInt(potential_r_paren_token) < tree.tokens.len() and potential_r_paren_token.tag(tree) == .@")";
 
-    const insert_token = tree.nodeMainToken(block);
-    const add_suffix_newline = is_last_param and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const insert_token = block.@"{".token(tree);
+    const add_suffix_newline = is_last_param and insert_token.add(1).tag(tree) == .@"}" and ast.tokensOnSameLine(tree, insert_token, insert_token.add(1));
     const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, true, add_suffix_newline);
 
     if (builder.wantKind(.@"source.fixAll")) {
@@ -430,7 +433,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) error{OutO
             .title = "remove function parameter",
             .kind = .quickfix,
             .isPreferred = false,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, fn_proto_param), "")}),
+            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.node.get(tree)), "")}),
         });
     }
 }
@@ -442,7 +445,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) error{Out
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const tree = &builder.handle.tree;
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, tree) orelse return;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.name, tree) orelse return;
     const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
     const identifier_full_name = offsets.tokenToSlice(tree, identifier_token);
 
@@ -453,15 +456,15 @@ fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) error{Out
     )) orelse return;
 
     const node = switch (decl.decl) {
-        .ast_node => |node| node,
-        .assign_destructure => |payload| payload.node,
+        .ast_node => |node| node.idx,
+        .assign_destructure => |payload| payload.node.idx,
         else => return,
     };
 
-    const insert_token = ast.lastToken(tree, node) + 1;
+    const insert_token = ast.lastToken(tree, node).add(1);
 
-    if (insert_token >= tree.tokens.len) return;
-    if (tree.tokenTag(insert_token) != .semicolon) return;
+    if (@backingInt(insert_token) >= tree.tokens.len()) return;
+    if (insert_token.tag(tree) != .@";") return;
 
     const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, false, false);
 
@@ -491,7 +494,7 @@ fn handleUnusedCapture(
     if (!builder.wantKind(.@"source.fixAll") and !builder.wantKind(.quickfix)) return;
 
     const tree = &builder.handle.tree;
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, tree) orelse return;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.name, tree) orelse return;
     const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
     const identifier_full_name = offsets.tokenToSlice(tree, identifier_token);
 
@@ -526,34 +529,34 @@ fn handleUnusedCapture(
 
     if (!builder.wantKind(.@"source.fixAll")) return;
 
-    const capture_end: Ast.TokenIndex = @intCast(std.mem.findScalarPos(
+    const capture_end: Ast.Token.Index = @fromBackingInt(@intCast(std.mem.findScalarPos(
         Token.Tag,
-        tree.tokens.items(.tag),
-        identifier_token,
-        .pipe,
-    ) orelse return);
+        tree.tokens.tag,
+        @backingInt(identifier_token),
+        .@"|",
+    ) orelse return));
 
-    var lbrace_token = capture_end + 1;
+    var lbrace_token = capture_end.add(1);
 
     // handle while loop continue statements such as `while(foo) |bar| : (x += 1) {}`
-    if (tree.tokenTag(capture_end + 1) == .colon) {
-        var token_index = capture_end + 2;
-        if (token_index >= tree.tokens.len) return;
-        if (tree.tokenTag(token_index) != .l_paren) return;
-        token_index += 1;
+    if (capture_end.add(1).tag(tree) == .@":") {
+        var token_index = capture_end.add(2);
+        if (@backingInt(token_index) >= tree.tokens.len()) return;
+        if (token_index.tag(tree) != .@"(") return;
+        token_index = token_index.add(1);
 
         var depth: u32 = 1;
-        while (true) : (token_index += 1) {
-            const tag = tree.tokenTag(token_index);
+        while (true) : (token_index = token_index.add(1)) {
+            const tag = token_index.tag(tree);
             switch (tag) {
                 .eof => return,
-                .l_paren => {
+                .@"(" => {
                     depth += 1;
                 },
-                .r_paren => {
+                .@")" => {
                     depth -= 1;
                     if (depth == 0) {
-                        token_index += 1;
+                        token_index = token_index.add(1);
                         break;
                     }
                 },
@@ -563,15 +566,15 @@ fn handleUnusedCapture(
         lbrace_token = token_index;
     }
 
-    if (lbrace_token + 1 >= tree.tokens.len) return;
-    if (tree.tokenTag(lbrace_token) != .l_brace) return;
+    if (@backingInt(lbrace_token.add(1)) >= tree.tokens.len()) return;
+    if (lbrace_token.tag(tree) != .@"(") return;
 
-    const is_last_capture = tree.tokenTag(identifier_token + 1) == .pipe;
+    const is_last_capture = identifier_token.add(1).tag(tree) == .@"|";
 
     const insert_token = lbrace_token;
     // if we are on the last capture of the block, we need to add an additional newline
     // i.e |a, b| { ... } -> |a, b| { ... \n_ = a; \n_ = b;\n }
-    const add_suffix_newline = is_last_capture and tree.tokenTag(insert_token + 1) == .r_brace and tree.tokensOnSameLine(insert_token, insert_token + 1);
+    const add_suffix_newline = is_last_capture and insert_token.add(1).tag(tree) == .@"}" and ast.tokensOnSameLine(tree, insert_token, insert_token.add(1));
     const insert_index, const new_text = try createDiscardText(builder, identifier_full_name, insert_token, true, add_suffix_newline);
 
     try builder.fixall_text_edits.insert(builder.arena, 0, builder.createTextEditPos(insert_index, new_text));
@@ -608,10 +611,10 @@ fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) error{OutOfMe
     if (!builder.wantKind(.quickfix)) return;
 
     const tree = &builder.handle.tree;
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, tree) orelse return;
-    if (identifier_token == 0) return;
-    const var_token = identifier_token - 1;
-    if (tree.tokenTag(var_token) != .keyword_var) return;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.name, tree) orelse return;
+    if (@backingInt(identifier_token) == 0) return;
+    const var_token = identifier_token.add(-1);
+    if (var_token.tag(tree) != .@"var") return;
 
     try builder.actions.append(builder.arena, .{
         .title = "use 'const'",
@@ -629,7 +632,8 @@ const ImportPlacement = enum {
 };
 
 fn analyzeImportPlacement(tree: *const Ast, imports: []const ImportDecl) ImportPlacement {
-    const root_decls = tree.rootDecls();
+    if (true) @panic("BRANCH_TODO: analyzeImportPlacement");
+    const root_decls = tree.root();
 
     if (root_decls.len == 0 or imports.len == 0) return .top;
 
@@ -697,13 +701,13 @@ fn handleUnorganizedImport(builder: *Builder) error{OutOfMemory}!void {
         const range: offsets.Range = switch (placement) {
             .top => blk: {
                 // Current behavior: insert at top after doc comments
-                const first_token = std.mem.findNone(Token.Tag, tree.tokens.items(.tag), &.{.container_doc_comment}) orelse tree.tokens.len;
-                const insert_pos = offsets.tokenToPosition(tree, @intCast(first_token), builder.offset_encoding);
+                const first_token: Ast.Token.Index = @fromBackingInt(@intCast(std.mem.findNone(Token.Tag, tree.tokens.tag, &.{.container_doc_comment}) orelse tree.tokens.len()));
+                const insert_pos = offsets.tokenToPosition(tree, first_token, builder.offset_encoding);
                 break :blk .{ .start = insert_pos, .end = insert_pos };
             },
             .bottom => blk: {
                 // Current behavior: insert at eof
-                break :blk offsets.tokenToRange(tree, @intCast(tree.tokens.len - 1), builder.offset_encoding);
+                break :blk offsets.tokenToRange(tree, @fromBackingInt(@intCast(tree.tokens.len() - 1)), builder.offset_encoding);
             },
         };
 
@@ -747,7 +751,7 @@ fn handleUnorganizedImport(builder: *Builder) error{OutOfMemory}!void {
 /// const name_slice = @import(value_slice);
 const ImportDecl = struct {
     var_decl: Ast.Node.Index,
-    first_comment_token: ?Ast.TokenIndex,
+    first_comment_token: ?Ast.Token.Index,
     name: []const u8,
     value: []const u8,
 
@@ -788,8 +792,8 @@ const ImportDecl = struct {
 
         if (sort_public_decls_first) {
             const node_tokens = context.nodes.items(.main_token);
-            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and context.tokenTag(node_tokens[lhs.var_decl] - 1) == .keyword_pub;
-            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and context.tokenTag(node_tokens[rhs.var_decl] - 1) == .keyword_pub;
+            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and context.tokenTag(node_tokens[lhs.var_decl] - 1) == .@"pub";
+            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and context.tokenTag(node_tokens[rhs.var_decl] - 1) == .@"pub";
             if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
         }
 
@@ -856,13 +860,13 @@ const ImportDecl = struct {
     }
 
     pub fn getSourceStartIndex(self: ImportDecl, tree: *const Ast) usize {
-        return tree.tokenStart(self.first_comment_token orelse tree.firstToken(self.var_decl));
+        return (self.first_comment_token orelse self.var_decl.firstToken(tree)).byteOffset(tree);
     }
 
     pub fn getSourceEndIndex(self: ImportDecl, tree: *const Ast, include_line_break: bool) usize {
         var last_token = ast.lastToken(tree, self.var_decl);
-        if (last_token + 1 < tree.tokens.len - 1 and tree.tokenTag(last_token + 1) == .semicolon) {
-            last_token += 1;
+        if (@backingInt(last_token.add(1)) < tree.tokens.len() - 1 and last_token.add(1).tag(tree) == .@";") {
+            last_token = last_token.add(1);
         }
 
         const end = offsets.tokenToLoc(tree, last_token).end;
@@ -880,9 +884,10 @@ const ImportDecl = struct {
 };
 
 fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfMemory}![]ImportDecl {
+    if (true) @panic("BRANCH_TODO: getImportsDecls");
     const tree = &builder.handle.tree;
 
-    const root_decls = tree.rootDecls();
+    const root_decls = tree.root().members;
 
     var skip_set: std.bit_set.Dynamic = try .initEmpty(allocator, root_decls.len);
     defer skip_set.deinit(allocator);
@@ -903,13 +908,13 @@ fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfM
 
             if (skip_set.isSet(root_decl_index)) continue;
 
-            if (tree.nodeTag(node) != .simple_var_decl) continue;
+            if (node.tag(tree) != .simple_var_decl) continue;
             const var_decl = tree.simpleVarDecl(node);
 
             var current_node = var_decl.ast.init_node.unwrap() orelse continue;
             const import: ImportDecl = found_decl: while (true) {
-                const token = tree.nodeMainToken(current_node);
-                switch (tree.nodeTag(current_node)) {
+                const token = current_node.mainToken(tree);
+                switch (current_node.tag(tree)) {
                     .builtin_call_two, .builtin_call_two_comma => {
                         // `>@import("string")<` case
                         const builtin_name = offsets.tokenToSlice(tree, token);
@@ -918,25 +923,25 @@ fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfM
                         const first_param, const second_param = tree.nodeData(current_node).opt_node_and_opt_node;
                         const param_node = first_param.unwrap() orelse continue :next_decl;
                         if (second_param != .none) continue :next_decl;
-                        if (tree.nodeTag(param_node) != .string_literal) continue :next_decl;
+                        if (param_node.tag(tree) != .string_literal) continue :next_decl;
 
                         const name_token = var_decl.ast.mut_token + 1;
-                        const value_token = tree.nodeMainToken(param_node);
+                        const value_token = param_node.mainToken(tree);
 
                         break :found_decl .{
                             .var_decl = node,
-                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree, tree.nodeMainToken(node)),
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree, node.mainToken(tree)),
                             .name = offsets.tokenToSlice(tree, name_token),
                             .value = offsets.tokenToSlice(tree, value_token),
                         };
                     },
-                    .field_access => {
+                    .expr_dot_access => {
                         // `@import("foo").>bar<` or `foo.>bar<` case
                         // drill down to the base import
                         current_node = tree.nodeData(current_node).node_and_token[0];
                         continue;
                     },
-                    .identifier => {
+                    .leaf => {
                         // `>std<.ascii` case - Might be an alias
                         const name_token = ast.identifierTokenFromIdentifierNode(tree, current_node) orelse continue :next_decl;
                         const name = offsets.identifierTokenToNameSlice(tree, name_token);
@@ -965,7 +970,7 @@ fn getImportsDecls(builder: *Builder, allocator: std.mem.Allocator) error{OutOfM
                         const var_name = offsets.tokenToSlice(tree, ident_name_token);
                         break :found_decl .{
                             .var_decl = node,
-                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree, tree.nodeMainToken(node)),
+                            .first_comment_token = Analyser.getDocCommentTokenIndex(tree, node.mainToken(tree)),
                             .name = var_name,
                             .value = var_name,
                             .parent_name = import_decl.getSortName(),
@@ -1046,7 +1051,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) err
 fn createDiscardText(
     builder: *Builder,
     identifier_name: []const u8,
-    insert_token: Ast.TokenIndex,
+    insert_token: Ast.Token.Index,
     add_block_indentation: bool,
     add_suffix_newline: bool,
 ) error{OutOfMemory}!struct {
@@ -1057,7 +1062,7 @@ fn createDiscardText(
 } {
     const tree = &builder.handle.tree;
     const insert_token_end = offsets.tokenToLoc(tree, insert_token).end;
-    const source_until_next_token = tree.source[0..tree.tokenStart(insert_token + 1)];
+    const source_until_next_token = tree.source[0..insert_token.add(1).byteOffset(tree)];
     // skip comments between the insert tokena and the token after it
     const insert_index = std.mem.findScalarPos(u8, source_until_next_token, insert_token_end, '\n') orelse source_until_next_token.len;
 
@@ -1096,7 +1101,8 @@ fn createDiscardText(
     return .{ insert_index, try new_text.toOwnedSlice(builder.arena) };
 }
 
-fn getParamRemovalRange(tree: *const Ast, param: Ast.full.FnProto.Param) offsets.Loc {
+fn getParamRemovalRange(tree: *const Ast, param: Ast.Expr.Fn.Param) offsets.Loc {
+    if (true) @panic("BRANCH_TODO: getParamRemovalRange");
     var loc = ast.paramLoc(tree, param, true);
 
     var trim_end = false;
@@ -1194,22 +1200,22 @@ const DiagnosticKind = union(enum) {
 /// takes the location of an identifier which is part of a discard `_ = location_here;`
 /// and returns the location from '_' until ';' or null on failure
 fn getDiscardLoc(tree: *const Ast, loc: offsets.Loc) ?offsets.Loc {
-    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, tree) orelse return null;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.name, tree) orelse return null;
 
     // check if the identifier is followed by a semicolon
-    const semicolon_token = identifier_token + 1;
-    if (semicolon_token >= tree.tokens.len) return null;
-    if (tree.tokenTag(semicolon_token) != .semicolon) return null;
+    const semicolon_token = identifier_token.add(1);
+    if (@backingInt(semicolon_token) >= tree.tokens.len()) return null;
+    if (semicolon_token.tag(tree) != .@";") return null;
 
     // check if the identifier is precede by a equal sign and then an underscore
-    if (identifier_token < 2) return null;
-    const equal_token = identifier_token - 1;
-    const underscore_token = identifier_token - 2;
-    if (tree.tokenTag(equal_token) != .equal) return null;
-    if (tree.tokenTag(underscore_token) != .identifier or !std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) return null;
+    if (@backingInt(identifier_token) < 2) return null;
+    const equal_token = identifier_token.add(-1);
+    const underscore_token = identifier_token.add(-2);
+    if (equal_token.tag(tree) != .@"=") return null;
+    if (underscore_token.tag(tree) != .name or !std.mem.eql(u8, offsets.tokenToSlice(tree, underscore_token), "_")) return null;
 
     // check if the colon is followed by the autofix comment
-    const colon_end_index = tree.tokenStart(semicolon_token) + 1;
+    const colon_end_index = semicolon_token.byteOffset(tree) + 1;
     const autofix_comment_start = std.mem.findNonePos(u8, tree.source, colon_end_index, " ") orelse return null;
     if (!std.mem.startsWith(u8, tree.source[autofix_comment_start..], "//")) return null;
     const autofix_str_start = std.mem.findNonePos(u8, tree.source, autofix_comment_start + "//".len, " ") orelse return null;
@@ -1218,7 +1224,7 @@ fn getDiscardLoc(tree: *const Ast, loc: offsets.Loc) ?offsets.Loc {
 
     // move backwards until we find a newline
     const start_position = found: {
-        var i = tree.tokenStart(underscore_token);
+        var i = underscore_token.byteOffset(tree);
         while (i > 0) : (i -= 1) {
             switch (tree.source[i - 1]) {
                 ' ', '\t' => {},

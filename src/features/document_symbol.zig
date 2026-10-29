@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/documentSymbol`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_documentSymbol)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const types = @import("lsp").types;
 const offsets = @import("../offsets.zig");
@@ -30,7 +30,7 @@ pub fn @"textDocument/documentSymbol"(
 }
 
 const Symbol = struct {
-    name_token: Ast.TokenIndex,
+    name_token: Ast.Token.Index,
     detail: ?[]const u8 = null,
     kind: types.SymbolKind,
     loc: offsets.Loc,
@@ -38,11 +38,11 @@ const Symbol = struct {
     children: std.ArrayList(Symbol),
 };
 
-pub fn tokenNameMaybeQuotes(tree: *const Ast, token: Ast.TokenIndex) []const u8 {
-    const token_slice = tree.tokenSlice(token);
-    switch (tree.tokenTag(token)) {
-        .identifier => return token_slice,
-        .string_literal => {
+pub fn tokenNameMaybeQuotes(tree: *const Ast, token: Ast.Token.Index) []const u8 {
+    const token_slice = token.slice(tree);
+    switch (token.tag(tree)) {
+        .name => return token_slice,
+        .string => {
             const name = token_slice[1 .. token_slice.len - 1];
             const trimmed = std.mem.trim(u8, name, &std.ascii.whitespace);
             // LSP spec requires that a symbol name not be empty or consisting only of whitespace,
@@ -68,14 +68,14 @@ pub fn getDocumentSymbols(
 
     const StackEntry = struct {
         current_symbols: *std.ArrayList(Symbol),
-        last_var_decl_name_token: Ast.OptionalTokenIndex,
-        parent_container: Ast.Node.Index,
+        last_var_decl_name_token: Ast.Token.OptionalIndex,
+        parent_container: Ast.Expr.Index,
     };
     var stack: std.ArrayList(StackEntry) = try .initCapacity(arena, 16);
     stack.appendAssumeCapacity(.{
         .current_symbols = &symbols,
         .last_var_decl_name_token = .none,
-        .parent_container = .root,
+        .parent_container = .{ .idx = .root },
     });
 
     var walker: ast.Walker = try .init(arena, tree, .root);
@@ -92,22 +92,20 @@ pub fn getDocumentSymbols(
         try stack.append(arena, stack.last().?);
         const stack_entry = stack.lastPtr().?;
 
-        const symbol: Symbol = switch (tree.nodeTag(node)) {
-            .global_var_decl,
-            .local_var_decl,
-            .simple_var_decl,
-            .aligned_var_decl,
-            => blk: {
+        const symbol: Symbol = switch (node.tag(tree)) {
+            // BRANCH_TODO is the `in_function` still necessary since we are excluding `.var_local`
+            // .var_local,
+            .var_global => blk: {
                 if (!ast.isContainer(tree, walker.parentNode())) continue;
 
-                const var_decl = tree.fullVarDecl(node).?;
-                const var_decl_name_token = var_decl.ast.mut_token + 1;
+                const var_decl: Ast.Member.GlobalVar = node.cast(.var_global, tree).?;
+                const var_decl_name_token = var_decl.name(tree) orelse continue;
 
-                stack_entry.last_var_decl_name_token = .fromToken(var_decl_name_token);
+                stack_entry.last_var_decl_name_token = .fromOptional(var_decl_name_token);
 
-                const kind: types.SymbolKind = switch (tree.tokenTag(tree.nodeMainToken(node))) {
-                    .keyword_var => .Variable,
-                    .keyword_const => .Constant,
+                const kind: types.SymbolKind = switch (node.mainToken(tree).tag(tree)) {
+                    .@"var" => .Variable,
+                    .@"const" => .Constant,
                     else => unreachable,
                 };
 
@@ -121,32 +119,32 @@ pub fn getDocumentSymbols(
                 };
             },
 
-            .test_decl => blk: {
-                const test_name_token = tree.nodeData(node).opt_token_and_node[0].unwrap() orelse continue;
+            .decl_test => blk: {
+                const decl_test: Ast.Member.Test = node.cast(.decl_test, tree).?;
+                const name_token = decl_test.name(tree) orelse continue;
 
                 break :blk .{
-                    .name_token = test_name_token,
+                    .name_token = name_token,
                     .kind = .Method, // there is no SymbolKind that represents a tests
                     .loc = offsets.nodeToLoc(tree, node),
-                    .selection_loc = offsets.tokenToLoc(tree, test_name_token),
+                    .selection_loc = offsets.tokenToLoc(tree, name_token),
                     .children = .empty,
                 };
             },
 
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
+            .type_fn,
+            .decl_fn,
             => |tag| blk: {
-                if (tag != .fn_decl and tree.nodeTag(walker.parentNode()) == .fn_decl) continue;
-                var buffer: [1]Ast.Node.Index = undefined;
-                const fn_info = tree.fullFnProto(&buffer, node).?;
-                const name_token = fn_info.name_token orelse continue;
+                if (tag != .decl_fn and walker.parentNode().tag(tree) == .decl_fn) continue;
+                const name_token = switch (tag) {
+                    .type_fn => node.cast(.type_fn, tree).?.name(tree),
+                    .decl_fn => node.cast(.decl_fn, tree).?.proto.get(tree).name(tree),
+                    else => unreachable,
+                } orelse continue;
 
                 break :blk .{
                     .name_token = name_token,
-                    .detail = analysis.getFunctionSignature(tree, fn_info),
+                    .detail = offsets.nodeToSlice(tree, node),
                     .kind = .Function,
                     .loc = offsets.nodeToLoc(tree, node),
                     .selection_loc = offsets.tokenToLoc(tree, name_token),
@@ -154,51 +152,24 @@ pub fn getDocumentSymbols(
                 };
             },
 
-            .container_field_init,
-            .container_field_align,
-            .container_field,
-            => blk: {
-                const container_kind = switch (tree.nodeTag(stack_entry.parent_container)) {
-                    .root => .keyword_struct,
-                    .container_decl,
-                    .container_decl_trailing,
-                    .container_decl_arg,
-                    .container_decl_arg_trailing,
-                    .container_decl_two,
-                    .container_decl_two_trailing,
-                    => tree.tokenTag(tree.nodeMainToken(stack_entry.parent_container)),
-                    .tagged_union,
-                    .tagged_union_trailing,
-                    .tagged_union_enum_tag,
-                    .tagged_union_enum_tag_trailing,
-                    .tagged_union_two,
-                    .tagged_union_two_trailing,
-                    => .keyword_union,
+            .member_field => blk: {
+                const container_kind: std.meta.Tag(Ast.Expr.Container.Kind) = switch (stack_entry.parent_container.idx.tag(tree)) {
+                    .root => .@"struct",
+                    .type_container => stack_entry.parent_container.cast(.container, tree).?.get(tree).kind.get(tree),
                     else => unreachable,
                 };
 
                 const kind: types.SymbolKind = switch (container_kind) {
-                    .keyword_struct => .Field,
-                    .keyword_union => .Field,
-                    .keyword_enum => .EnumMember,
-                    .keyword_opaque => continue,
-                    else => unreachable,
+                    .@"struct" => .Field,
+                    .@"union" => .Field,
+                    .@"enum" => .EnumMember,
+                    .@"opaque" => continue,
                 };
 
-                var container_field = tree.fullContainerField(node).?;
-                switch (container_kind) {
-                    .keyword_struct => {},
-                    .keyword_enum, .keyword_union => container_field.convertToNonTupleLike(tree),
-                    else => unreachable,
-                }
-                if (container_field.ast.tuple_like) continue;
-
-                const decl_name_token = container_field.ast.main_token;
-
-                if (tree.tokenTag(decl_name_token) != .identifier) {
-                    _ = ast.identifierTokenFromIdentifierNode; // possibly related
-                    continue;
-                }
+                const member_field: Ast.Member.Field = node.cast(.member_field, tree).?;
+                const member_field_name_leaf = member_field.name orelse continue;
+                const member_field_name_token = member_field_name_leaf.token(tree);
+                std.debug.assert(member_field_name_token.tag(tree) == .name);
 
                 const guessed_container_name = if (stack_entry.last_var_decl_name_token.unwrap()) |name_token|
                     offsets.identifierTokenToNameSlice(tree, name_token)
@@ -206,35 +177,23 @@ pub fn getDocumentSymbols(
                     null;
 
                 break :blk .{
-                    .name_token = decl_name_token,
+                    .name_token = member_field_name_token,
                     .detail = guessed_container_name,
                     .kind = kind,
                     .loc = offsets.nodeToLoc(tree, node),
-                    .selection_loc = offsets.tokenToLoc(tree, decl_name_token),
+                    .selection_loc = offsets.tokenToLoc(tree, member_field_name_token),
                     .children = .empty,
                 };
             },
-            .container_decl,
-            .container_decl_trailing,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            .tagged_union,
-            .tagged_union_trailing,
-            .tagged_union_enum_tag,
-            .tagged_union_enum_tag_trailing,
-            .tagged_union_two,
-            .tagged_union_two_trailing,
-            => {
-                stack_entry.parent_container = node;
+            .type_container => {
+                stack_entry.parent_container = .{ .idx = node };
                 continue;
             },
             else => continue,
         };
 
-        switch (tree.tokenTag(symbol.name_token)) {
-            .identifier, .string_literal => {},
+        switch (symbol.name_token.tag(tree)) {
+            .name, .string => {},
             else => unreachable,
         }
 

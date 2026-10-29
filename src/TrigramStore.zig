@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const ast = @import("ast.zig");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 const assert = std.debug.assert;
 const offsets = @import("offsets.zig");
 
@@ -22,7 +22,7 @@ pub const Declaration = struct {
     };
 
     /// Either `.identifier` or `.string_literal`.
-    name: Ast.TokenIndex,
+    name: Ast.Token.Index,
     kind: Kind,
 };
 
@@ -49,79 +49,62 @@ pub fn init(
 
     while (try walker.next(allocator, tree)) |entry| {
         switch (entry) {
-            .open => |node| switch (tree.nodeTag(node)) {
-                .fn_decl => try in_function_stack.append(allocator, true),
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                => {
-                    const fn_token = tree.nodeMainToken(node);
-                    if (tree.tokenTag(fn_token + 1) != .identifier) continue;
+            .open => |node| switch (node.tag(tree)) {
+                .decl_fn => try in_function_stack.append(allocator, true),
+                .type_fn => {
+                    const fn_token = node.mainToken(tree);
+                    if (fn_token.add(1).tag(tree) != .name) continue;
 
                     try store.appendDeclaration(
                         allocator,
                         tree,
-                        fn_token + 1,
+                        fn_token.add(1),
                         .function,
                     );
                 },
-                .test_decl => {
+                .decl_test => {
                     try in_function_stack.append(allocator, true);
-                    const test_name_token = tree.nodeData(node).opt_token_and_node[0].unwrap() orelse continue;
+                    const decl_test: Ast.Member.Test = node.cast(.decl_test, tree).?;
+                    const name_token = decl_test.name(tree) orelse continue;
 
                     try store.appendDeclaration(
                         allocator,
                         tree,
-                        test_name_token,
+                        name_token,
                         .test_function,
                     );
                 },
-                .container_decl,
-                .container_decl_trailing,
-                .container_decl_arg,
-                .container_decl_arg_trailing,
-                .container_decl_two,
-                .container_decl_two_trailing,
-                .tagged_union,
-                .tagged_union_trailing,
-                .tagged_union_enum_tag,
-                .tagged_union_enum_tag_trailing,
-                .tagged_union_two,
-                .tagged_union_two_trailing,
-                => try in_function_stack.append(allocator, false),
+                .type_container => try in_function_stack.append(allocator, false),
 
-                .global_var_decl,
-                .local_var_decl,
-                .simple_var_decl,
-                .aligned_var_decl,
+                // BRANCH_TODO is the `in_function` still necessary since we are excluding `.var_local`
+                // .var_local,
+                .var_global,
                 => {
                     const in_function = in_function_stack.last() orelse false;
                     if (in_function) continue;
 
-                    const main_token = tree.nodeMainToken(node);
+                    const var_decl: Ast.Member.GlobalVar = node.cast(.var_global, tree).?;
 
-                    const kind: Declaration.Kind = switch (tree.tokenTag(main_token)) {
-                        .keyword_var => .variable,
-                        .keyword_const => .constant,
-                        else => unreachable,
+                    const kind: Declaration.Kind = switch (var_decl.mutability.get(tree)) {
+                        .@"var" => .variable,
+                        .@"const" => .constant,
                     };
+                    const name_token = var_decl.name(tree) orelse continue;
 
-                    if (isVarDeclAlias(tree, node)) continue;
+                    if (isVarDeclAlias(tree, var_decl)) continue;
 
                     try store.appendDeclaration(
                         allocator,
                         tree,
-                        main_token + 1,
+                        name_token,
                         kind,
                     );
                 },
-                .container_field_init,
-                .container_field_align,
-                .container_field,
-                => {
-                    const name_token = tree.nodeMainToken(node);
-                    if (tree.tokenTag(name_token) != .identifier) continue;
+                .member_field => {
+                    const member_field: Ast.Member.Field = node.cast(.member_field, tree).?;
+                    const name_leaf = member_field.name orelse continue;
+                    const name_token = name_leaf.token(tree);
+                    std.debug.assert(name_token.tag(tree) == .name);
 
                     try store.appendDeclaration(
                         allocator,
@@ -132,21 +115,9 @@ pub fn init(
                 },
                 else => {},
             },
-            .close => |node| switch (tree.nodeTag(node)) {
-                .fn_decl, .test_decl => assert(in_function_stack.pop().?),
-                .container_decl,
-                .container_decl_trailing,
-                .container_decl_arg,
-                .container_decl_arg_trailing,
-                .container_decl_two,
-                .container_decl_two_trailing,
-                .tagged_union,
-                .tagged_union_trailing,
-                .tagged_union_enum_tag,
-                .tagged_union_enum_tag_trailing,
-                .tagged_union_two,
-                .tagged_union_two_trailing,
-                => assert(!in_function_stack.pop().?),
+            .close => |node| switch (node.tag(tree)) {
+                .decl_fn, .decl_test => assert(in_function_stack.pop().?),
+                .type_container => assert(!in_function_stack.pop().?),
                 else => {},
             },
         }
@@ -251,14 +222,14 @@ fn appendDeclaration(
     store: *TrigramStore,
     allocator: std.mem.Allocator,
     tree: *const Ast,
-    name_token: Ast.TokenIndex,
+    name_token: Ast.Token.Index,
     kind: Declaration.Kind,
 ) error{OutOfMemory}!void {
-    const raw_name = tree.tokenSlice(name_token);
+    const raw_name = name_token.slice(tree);
 
-    const strategy: enum { raw, smart }, const name = switch (tree.tokenTag(name_token)) {
-        .string_literal => .{ .raw, raw_name[1 .. raw_name.len - 1] },
-        .identifier => if (std.mem.startsWith(u8, raw_name, "@"))
+    const strategy: enum { raw, smart }, const name = switch (name_token.tag(tree)) {
+        .string => .{ .raw, raw_name[1 .. raw_name.len - 1] },
+        .name => if (std.mem.startsWith(u8, raw_name, "@"))
             .{ .raw, raw_name[2 .. raw_name.len - 1] }
         else
             .{ .smart, raw_name },
@@ -311,24 +282,24 @@ fn appendOneTrigram(
 /// const Baz = a.Bar; // false
 /// const Biz = 5; // false
 /// ```
-fn isVarDeclAlias(tree: *const Ast, var_decl: Ast.Node.Index) bool {
-    const main_token = tree.nodeMainToken(var_decl);
+fn isVarDeclAlias(tree: *const Ast, var_decl: Ast.Member.GlobalVar) bool {
+    switch (var_decl.mutability.get(tree)) {
+        .@"const" => {},
+        .@"var" => return false,
+    }
 
-    if (tree.tokenTag(main_token) != .keyword_const) return false;
-    const init_node = tree.fullVarDecl(var_decl).?.ast.init_node.unwrap() orelse return false;
+    const init_node = var_decl.init orelse return false;
+    const init_expr: Ast.Expr.DotAccess = (init_node.cast(.dot_access, tree) orelse return false).get(tree);
 
-    if (tree.nodeTag(init_node) != .field_access) return false;
-
-    const lhs_node, const field_name_token = tree.nodeData(init_node).node_and_token;
-    const alias_name = offsets.identifierTokenToNameSlice(tree, main_token + 1);
-    const target_name = offsets.identifierTokenToNameSlice(tree, field_name_token);
+    const alias_name = offsets.identifierTokenToNameSlice(tree, var_decl.name(tree) orelse return false);
+    const target_name = offsets.identifierTokenToNameSlice(tree, init_expr.rhs.token(tree));
     if (!std.mem.eql(u8, alias_name, target_name)) return false;
 
-    var current_node = lhs_node;
+    var current_node = init_expr.lhs;
     while (true) {
-        switch (tree.nodeTag(current_node)) {
-            .identifier => return true,
-            .field_access => current_node = tree.nodeData(current_node).node_and_token[0],
+        switch (current_node.idx.tag(tree)) {
+            .leaf => return current_node.cast(.name, tree) != null,
+            .expr_dot_access => current_node = current_node.cast(.dot_access, tree).?.get(tree).lhs,
             else => return false,
         }
     }

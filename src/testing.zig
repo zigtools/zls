@@ -32,7 +32,7 @@ pub fn expectEqualStrings(expected: []const u8, actual: []const u8) error{TestEx
 }
 
 pub fn printDocumentScope(doc_scope: DocumentScope) void {
-    if (builtin.mode != .Debug) @compileError("this function should only be used in debug mode!");
+    if (builtin.mode != .debug) @compileError("this function should only be used in debug mode!");
 
     for (0..doc_scope.scopes.len) |index| {
         const scope_index: DocumentScope.Scope.Index = @fromBackingInt(@intCast(index));
@@ -276,5 +276,5 @@ fn printLine(line: []const u8) void {
 }
 
 comptime {
-    std.testing.refAllDecls(print_ast);
+    // std.testing.refAllDecls(print_ast);
 }

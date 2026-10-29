@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/references`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_references)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
@@ -62,7 +62,7 @@ fn labelReferences(
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
     const first_tok = decl.identifier;
-    const last_tok = ast.lastToken(tree, decl.block);
+    const last_tok = ast.lastToken(tree, decl.expr.idx);
 
     var locations: std.ArrayList(types.Location) = .empty;
     errdefer locations.deinit(allocator);
@@ -75,19 +75,19 @@ fn labelReferences(
         });
     }
 
-    var curr_tok = first_tok + 1;
-    while (curr_tok < last_tok - 2) : (curr_tok += 1) {
-        const curr_id = tree.tokenTag(curr_tok);
+    var curr_tok = first_tok.add(1);
+    while (@backingInt(curr_tok) < @backingInt(last_tok.add(-2))) : (curr_tok = curr_tok.add(1)) {
+        const curr_id = curr_tok.tag(tree);
 
-        if (curr_id != .keyword_break and curr_id != .keyword_continue) continue;
-        if (tree.tokenTag(curr_tok + 1) != .colon) continue;
-        if (tree.tokenTag(curr_tok + 2) != .identifier) continue;
+        if (curr_id != .@"break" and curr_id != .@"continue") continue;
+        if (curr_tok.add(1).tag(tree) != .@":") continue;
+        if (curr_tok.add(2).tag(tree) != .name) continue;
 
-        if (!std.mem.eql(u8, tree.tokenSlice(curr_tok + 2), tree.tokenSlice(first_tok))) continue;
+        if (!std.mem.eql(u8, curr_tok.add(2).slice(tree), first_tok.slice(tree))) continue;
 
         try locations.append(allocator, .{
             .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(tree, curr_tok + 2, encoding),
+            .range = offsets.tokenToRange(tree, curr_tok.add(2), encoding),
         });
     }
 
@@ -106,7 +106,7 @@ const Builder = struct {
     analyser: *Analyser,
     encoding: offsets.Encoding,
 
-    fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
+    fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.Token.Index) error{OutOfMemory}!void {
         if (self.target_symbol.handle == handle and
             self.target_symbol.nameToken() == token_index)
         {
@@ -143,21 +143,22 @@ const Builder = struct {
             builder.target_symbol.nameToken(),
         );
 
-        var candidate: Analyser.DeclWithHandle, const name_token = candidate: switch (tree.nodeTag(node)) {
-            .identifier,
-            .test_decl,
+        var candidate: Analyser.DeclWithHandle, const name_token = candidate: switch (node.tag(tree)) {
+            .leaf,
+            .decl_test,
             => |tag| {
                 const name_token = switch (tag) {
-                    .identifier => ast.identifierTokenFromIdentifierNode(tree, node) orelse return,
-                    .test_decl => blk: {
-                        const name_token = tree.nodeData(node).opt_token_and_node[0].unwrap() orelse return;
-                        if (tree.tokenTag(name_token) != .identifier) return;
+                    .leaf => ast.identifierTokenFromIdentifierNode(tree, node) orelse return,
+                    .decl_test => blk: {
+                        const decl_test: Ast.Member.Test = node.cast(.decl_test, tree).?;
+                        const name_token = decl_test.name(tree) orelse return;
+                        if (name_token.tag(tree) != .name) return;
                         break :blk name_token;
                     },
                     else => unreachable,
                 };
                 const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                const is_escaped_identifier = tree.source[tree.tokenStart(name_token)] == '@';
+                const is_escaped_identifier = tree.source[name_token.byteOffset(tree)] == '@';
 
                 if (!is_escaped_identifier) {
                     if (std.mem.eql(u8, name, "_")) return;
@@ -169,57 +170,46 @@ const Builder = struct {
                 const candidate = try builder.analyser.lookupSymbolGlobal(
                     handle,
                     name,
-                    tree.tokenStart(name_token),
+                    name_token.byteOffset(tree),
                 ) orelse return;
                 break :candidate .{ candidate, name_token };
             },
-            .field_access => {
+            .expr_dot_access => {
                 if (builder.local_only_decl) return;
-                const lhs_node, const field_token = tree.nodeData(node).node_and_token;
+                const expr: Ast.Expr.DotAccess = node.cast(.expr_dot_access, tree).?;
+                const field_token = expr.rhs.token(tree);
                 const name = offsets.identifierTokenToNameSlice(tree, field_token);
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
 
-                const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
+                const lhs = try builder.analyser.resolveTypeOfNode(.of(expr.lhs.idx, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
                 const candidate = try deref_lhs.lookupSymbol(builder.analyser, name) orelse return;
                 break :candidate .{ candidate, field_token };
             },
-            .struct_init_one,
-            .struct_init_one_comma,
-            .struct_init,
-            .struct_init_comma,
-            .struct_init_dot,
-            .struct_init_dot_comma,
-            .struct_init_dot_two,
-            .struct_init_dot_two_comma,
-            => {
+            .expr_init => {
                 if (builder.local_only_decl) return;
-                var buffer: [2]Ast.Node.Index = undefined;
-                const struct_init = tree.fullStructInit(&buffer, node).?;
-                for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
-                    const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
+                const expr: Ast.Expr.Init = node.cast(.expr_init, tree).?;
+                var it = expr.fields.iter(tree);
+                while (it.next(tree)) |field_idx| { // the node of `value` in `.name = value`
+                    const field = field_idx.get(tree);
+                    const struct_field = switch (field) {
+                        .struct_field => |idx| idx.get(tree),
+                        .tuple_field => continue,
+                    };
+
+                    const name_token = struct_field.name.token(tree);
                     const name = offsets.identifierTokenToNameSlice(tree, name_token);
                     if (!std.mem.eql(u8, name, target_symbol_name)) continue;
 
-                    const nodes = switch (tree.nodeTag(node)) {
-                        .struct_init_dot,
-                        .struct_init_dot_comma,
-                        .struct_init_dot_two,
-                        .struct_init_dot_two_comma,
-                        => try ast.nodesOverlappingIndex(
+                    const nodes = if (expr.type) |type_expr|
+                        &.{type_expr.idx}
+                    else
+                        try ast.nodesOverlappingIndex(
                             builder.analyser.arena,
                             tree,
-                            tree.tokenStart(name_token),
-                        ),
-                        // if this isn't an anonymous struct the type can be determined from the `T{}` directly
-                        .struct_init_one,
-                        .struct_init_one_comma,
-                        .struct_init,
-                        .struct_init_comma,
-                        => &.{node},
-                        else => unreachable,
-                    };
+                            name_token.byteOffset(tree),
+                        );
 
                     const candidate, _ = try builder.analyser.lookupSymbolFieldInit(
                         handle,
@@ -234,35 +224,38 @@ const Builder = struct {
                 }
                 return;
             },
-            .enum_literal => {
+            .leaf_enum_literal => {
                 if (builder.local_only_decl) return;
-                const name_token = tree.nodeMainToken(node);
+                const name_token = node.mainToken(tree);
                 const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
                 if (!std.mem.eql(u8, name, target_symbol_name)) return;
-                const candidate, _ = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
+                const candidate, _ = try builder.analyser.getSymbolEnumLiteral(handle, name_token.byteOffset(tree), name) orelse return;
                 break :candidate .{ candidate, name_token };
             },
-            .global_var_decl,
-            .local_var_decl,
-            .aligned_var_decl,
-            .simple_var_decl,
-            => {
+            inline .var_local, .var_global => |t| {
                 if (builder.local_only_decl) return;
-                const var_decl = tree.fullVarDecl(node).?;
+                const var_decl = node.cast(t, tree).?;
 
-                const alias_name_token = var_decl.ast.mut_token + 1;
+                const alias_name_token = var_decl.name(tree) orelse return;
                 const alias_name = offsets.identifierTokenToNameSlice(&handle.tree, alias_name_token);
                 if (!std.mem.eql(u8, alias_name, target_symbol_name)) return;
 
-                const init_node = var_decl.ast.init_node.unwrap() orelse return;
-                if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return;
+                switch (var_decl.mutability.get(tree)) {
+                    .@"const" => {},
+                    .@"var" => return,
+                }
 
-                if (tree.nodeTag(init_node) != .field_access) return;
-                const lhs_node, const field_token = tree.nodeData(init_node).node_and_token;
+                const opt_init_expr: ?Ast.Expr.Index = var_decl.init;
+                const init_expr = opt_init_expr orelse return;
+
+                const dot_access_node = init_expr.cast(.dot_access, tree) orelse return;
+                const dot_access: Ast.Expr.DotAccess = dot_access_node.get(tree);
+
+                const field_token = dot_access.rhs.token(tree);
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_token);
                 if (!std.mem.eql(u8, field_name, target_symbol_name)) return;
 
-                const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
+                const lhs = try builder.analyser.resolveTypeOfNode(.of(dot_access.lhs.idx, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
                 const candidate = try deref_lhs.lookupSymbol(builder.analyser, field_name) orelse return;
@@ -304,7 +297,7 @@ fn symbolReferences(
     };
 
     const doc_scope = try target_symbol.handle.getDocumentScope();
-    const source_index = target_symbol.handle.tree.tokenStart(target_symbol.nameToken());
+    const source_index = target_symbol.nameToken().byteOffset(&target_symbol.handle.tree);
     const scope_index = Analyser.innermostScopeAtIndexWithTag(doc_scope, source_index, .init(.{
         .block = true,
         .container = true,
@@ -329,7 +322,7 @@ fn symbolReferences(
         => scope_node,
         .switch_payload,
         .switch_inline_tag_payload,
-        => |payload| payload.node,
+        => |payload| payload.node.idx,
         .function_parameter => |payload| payload.func,
         .label => unreachable, // handled separately by labelReferences
         .error_token => return .empty,
@@ -445,46 +438,41 @@ fn controlFlowReferences(
     const tree = &handle.tree;
     const kw_token = token_handle.token;
 
-    var results: std.ArrayList(Ast.TokenIndex) = .empty;
+    var results: std.ArrayList(Ast.Token.Index) = .empty;
     defer results.deinit(allocator);
 
-    switch (tree.tokenTag(kw_token)) {
-        .keyword_continue,
-        .keyword_break,
+    switch (kw_token.tag(tree)) {
+        .@"continue",
+        .@"break",
         => {
-            const nodes = try ast.nodesOverlappingIndex(allocator, tree, handle.tree.tokenStart(kw_token));
+            const nodes = try ast.nodesOverlappingIndex(allocator, tree, kw_token.byteOffset(&handle.tree));
             defer allocator.free(nodes);
 
             const maybe_label = blk: {
-                if (kw_token + 2 >= tree.tokens.len) break :blk null;
-                if (tree.tokenTag(kw_token + 1) != .colon) break :blk null;
-                if (tree.tokenTag(kw_token + 2) != .identifier) break :blk null;
-                break :blk offsets.identifierTokenToNameSlice(tree, kw_token + 2);
+                if (@backingInt(kw_token.add(2)) >= tree.tokens.len()) break :blk null;
+                if (kw_token.add(1).tag(tree) != .@":") break :blk null;
+                if (kw_token.add(2).tag(tree) != .name) break :blk null;
+                break :blk offsets.identifierTokenToNameSlice(tree, kw_token.add(2));
             };
-            for (nodes) |node| switch (tree.nodeTag(node)) {
-                .for_simple,
-                .@"for",
-                .while_cont,
-                .while_simple,
-                .@"while",
+            for (nodes) |node| switch (node.tag(tree)) {
+                .expr_for,
+                .expr_while,
                 => {
                     // if the break/continue is unlabeled it must belong to the first loop we encounter
-                    const main_token = tree.nodeMainToken(node);
+                    const main_token = node.mainToken(tree);
                     const label = maybe_label orelse break try results.append(allocator, main_token);
-                    const loop_label = if (tree.isTokenPrecededByTags(main_token, &.{ .identifier, .colon }))
-                        offsets.identifierTokenToNameSlice(tree, main_token - 2)
+                    const loop_label = if (ast.isTokenPrecededByTags(tree, main_token, &.{ .name, .@":" }))
+                        offsets.identifierTokenToNameSlice(tree, main_token.add(-2))
                     else
                         continue;
                     if (std.mem.eql(u8, label, loop_label)) {
                         try results.append(allocator, main_token);
                     }
                 },
-                .switch_comma,
-                .@"switch",
-                => {
+                .expr_switch => {
                     const label = maybe_label orelse continue;
-                    const main_token = tree.nodeMainToken(node);
-                    const switch_label = if (tree.tokenTag(main_token) == .identifier)
+                    const main_token = node.mainToken(tree);
+                    const switch_label = if (main_token.tag(tree) == .name)
                         offsets.identifierTokenToNameSlice(tree, main_token)
                     else
                         continue;
@@ -492,25 +480,25 @@ fn controlFlowReferences(
                         try results.append(
                             allocator,
                             // we already know the switch is labeled so we can just offset
-                            main_token + 2,
+                            main_token.add(2),
                         );
                     }
                 },
                 else => {},
             };
         },
-        .keyword_for,
-        .keyword_while,
-        .keyword_switch,
+        .@"for",
+        .@"while",
+        .@"switch",
         => |tag| {
-            const maybe_label = if (tree.isTokenPrecededByTags(kw_token, &.{ .identifier, .colon }))
-                offsets.identifierTokenToNameSlice(tree, kw_token - 2)
+            const maybe_label = if (ast.isTokenPrecededByTags(tree, kw_token, &.{ .name, .@":" }))
+                offsets.identifierTokenToNameSlice(tree, kw_token.add(-2))
             else
                 null;
 
-            if (tag == .keyword_switch and maybe_label == null) return .empty;
+            if (tag == .@"switch" and maybe_label == null) return .empty;
 
-            const nodes = try ast.nodesOverlappingIndex(allocator, tree, tree.tokenStart(kw_token));
+            const nodes = try ast.nodesOverlappingIndex(allocator, tree, kw_token.byteOffset(tree));
             defer allocator.free(nodes);
 
             var walker: ast.Walker = try .init(allocator, tree, nodes[0]);
@@ -522,23 +510,20 @@ fn controlFlowReferences(
 
             while (try walker.next(allocator, tree)) |event| {
                 switch (event) {
-                    .open => |node| switch (tree.nodeTag(node)) {
-                        .@"break", .@"continue" => {
-                            const label_token = tree.nodeData(node).opt_token_and_opt_node[0].unwrap();
+                    .open => |node| switch (node.tag(tree)) {
+                        inline .expr_break, .expr_continue => |t| {
+                            const label_token = node.cast(t, tree).?.label(tree);
                             if (label_token) |actual_label_token| {
                                 const actual_label = offsets.identifierTokenToNameSlice(tree, actual_label_token);
                                 if (maybe_label) |expected_label| {
                                     if (!std.mem.eql(u8, expected_label, actual_label)) continue;
                                 }
                             } else if (loop_depth > 1) continue;
-                            try results.append(allocator, tree.nodeMainToken(node));
+                            try results.append(allocator, node.mainToken(tree));
                         },
 
-                        .@"while",
-                        .while_simple,
-                        .while_cont,
-                        .@"for",
-                        .for_simple,
+                        .expr_while,
+                        .expr_for,
                         => {
                             if (maybe_label == null) {
                                 walker.skip();
@@ -548,12 +533,9 @@ fn controlFlowReferences(
                         },
                         else => {},
                     },
-                    .close => |node| switch (tree.nodeTag(node)) {
-                        .@"while",
-                        .while_simple,
-                        .while_cont,
-                        .@"for",
-                        .for_simple,
+                    .close => |node| switch (node.tag(tree)) {
+                        .expr_while,
+                        .expr_for,
                         => {
                             if (maybe_label != null) {
                                 loop_depth -= 1;
@@ -617,44 +599,34 @@ const CallBuilder = struct {
         node: Ast.Node.Index,
     ) Analyser.Error!void {
         const tree = &handle.tree;
-        switch (tree.nodeTag(node)) {
-            .call,
-            .call_comma,
-            .call_one,
-            .call_one_comma,
-            => {
-                var buf: [1]Ast.Node.Index = undefined;
-                const call = tree.fullCall(&buf, node).?;
+        const call_expr: Ast.Expr.Call = node.cast(.expr_call, tree) orelse return;
+        switch (call_expr.callee.idx.tag(tree)) {
+            .leaf => {
+                const name_token = node.mainToken(tree);
+                if (name_token.tag(tree) != .name) return;
+                const name = offsets.identifierTokenToNameSlice(tree, name_token);
 
-                const called_node = call.ast.fn_expr;
+                const child = (try builder.analyser.lookupSymbolGlobal(
+                    handle,
+                    name,
+                    name_token.byteOffset(tree),
+                )) orelse return;
 
-                switch (tree.nodeTag(called_node)) {
-                    .identifier => {
-                        const identifier_token = ast.identifierTokenFromIdentifierNode(tree, called_node) orelse return;
+                if (builder.target_decl.eql(child)) {
+                    try builder.add(handle, node);
+                }
+            },
+            .expr_dot_access => {
+                const expr: Ast.Expr.DotAccess = node.cast(.expr_dot_access, tree).?;
+                const field_name = expr.rhs.token(tree);
+                const lhs = (try builder.analyser.resolveTypeOfNode(.of(expr.lhs.idx, handle))) orelse return;
+                const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
-                        const child = (try builder.analyser.lookupSymbolGlobal(
-                            handle,
-                            offsets.identifierTokenToNameSlice(tree, identifier_token),
-                            tree.tokenStart(identifier_token),
-                        )) orelse return;
+                const symbol = offsets.tokenToSlice(tree, field_name);
+                const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
 
-                        if (builder.target_decl.eql(child)) {
-                            try builder.add(handle, node);
-                        }
-                    },
-                    .field_access => {
-                        const lhs_node, const field_name = tree.nodeData(called_node).node_and_token;
-                        const lhs = (try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle))) orelse return;
-                        const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
-
-                        const symbol = offsets.tokenToSlice(tree, field_name);
-                        const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
-
-                        if (builder.target_decl.eql(child)) {
-                            try builder.add(handle, node);
-                        }
-                    },
-                    else => {},
+                if (builder.target_decl.eql(child)) {
+                    try builder.add(handle, node);
                 }
             },
             else => {},

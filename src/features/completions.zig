@@ -1,7 +1,7 @@
 //! Implementation of [`textDocument/completion`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion)
 
 const std = @import("std");
-const Ast = std.zig.Ast;
+const Ast = @import("zirp").Ast;
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
@@ -216,7 +216,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
 }
 
 fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Analyser.Error!void {
-    const name = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken());
+    const name = decl_handle.nameToken().slice(&decl_handle.handle.tree);
 
     var doc_comments_buffer: [2][]const u8 = undefined;
     var doc_comments: std.ArrayList([]const u8) = .initBuffer(&doc_comments_buffer);
@@ -252,15 +252,15 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
         const node_with_handle = resolved_ty.data.compile_error;
         const tree = &node_with_handle.handle.tree;
 
-        var buffer: [2]Ast.Node.Index = undefined;
-        const params = tree.builtinCallParams(&buffer, node_with_handle.node) orelse break :blk null;
-        if (params.len != 1) break :blk null;
+        const buildtin_call = node_with_handle.node.cast(.expr_builtin_call, tree) orelse break :blk null;
+        var builtin_call_arg_it = buildtin_call.args.iter(tree);
 
-        if (tree.nodeTag(params[0]) == .string_literal) {
-            const literal = tree.tokenSlice(tree.nodeMainToken(params[0]));
-            break :blk literal[1 .. literal.len - 1];
-        }
-        break :blk "";
+        const first_arg = builtin_call_arg_it.next(tree) orelse break :blk null;
+        if (builtin_call_arg_it.next(tree) != null) break :blk null;
+
+        const first_arg_string = first_arg.cast(.string, tree) orelse break :blk "";
+        const literal = first_arg_string.token(tree).slice(tree);
+        break :blk literal[1 .. literal.len - 1];
     };
 
     switch (decl_handle.decl) {
@@ -276,16 +276,11 @@ fn declToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle) Ana
         => {
             var kind: types.completion.Item.Kind = blk: {
                 const parent_is_type_val = if (decl_handle.container_type) |container_ty| container_ty.is_type_val else null;
-                if (decl_handle.decl == .ast_node)
-                    switch (decl_handle.handle.tree.nodeTag(decl_handle.decl.ast_node)) {
-                        .container_field_init,
-                        .container_field_align,
-                        .container_field,
-                        => {
-                            if (!(parent_is_type_val orelse true)) break :blk .Field;
-                        },
-                        else => {},
-                    };
+                if (decl_handle.decl == .ast_node) {
+                    if (decl_handle.decl.ast_node.idx.tag(&decl_handle.handle.tree) == .member_field) {
+                        if (!(parent_is_type_val orelse true)) break :blk .Field;
+                    }
+                }
                 break :blk if (decl_handle.isConst()) .Constant else .Variable;
             };
 
@@ -478,7 +473,7 @@ fn labelDeclToCompletion(builder: *Builder, decl_handle: Analyser.DeclWithHandle
     std.debug.assert(decl_handle.decl == .label);
 
     try builder.completions.append(builder.arena, .{
-        .label = decl_handle.handle.tree.tokenSlice(decl_handle.nameToken()),
+        .label = decl_handle.nameToken().slice(&decl_handle.handle.tree),
         .kind = .Text,
     });
 }
@@ -545,24 +540,24 @@ fn prepareCompletionLoc(tree: *const Ast, source_index: usize) offsets.Loc {
     const token = switch (offsets.sourceIndexToTokenIndex(tree, source_index)) {
         .none => return fallback_loc,
         .one => |token| token,
-        .between => |data| switch (tree.tokenTag(data.left)) {
-            .identifier, .builtin, .invalid => data.left,
-            else => |tag| if (ast.isKeyword(tag)) data.left else data.right,
+        .between => |data| switch (data.left.tag(tree)) {
+            .name, .name_builtin, .invalid => data.left,
+            else => |tag| if (Ast.Token.Tag.keyword_set.contains(tag)) data.left else data.right,
         },
     };
-    switch (tree.tokenTag(token)) {
-        .identifier, .builtin => |tag| {
-            if (tag == .builtin and tree.tokenStart(token) == source_index) return fallback_loc;
+    switch (token.tag(tree)) {
+        .name, .name_builtin => |tag| {
+            if (tag == .name_builtin and token.byteOffset(tree) == source_index) return fallback_loc;
             const token_loc = offsets.tokenToLoc(tree, token);
             std.debug.assert(token_loc.start <= source_index and source_index <= token_loc.end);
-            return offsets.identifierIndexToLoc(tree.source, token_loc.start, if (tag == .builtin) .name else .full);
+            return offsets.identifierIndexToLoc(tree.source, token_loc.start, if (tag == .name_builtin) .name else .full);
         },
         else => |token_tag| {
-            if (token_tag != .invalid and !ast.isKeyword(token_tag))
+            if (token_tag != .invalid and !Ast.Token.Tag.keyword_set.contains(token_tag))
                 return fallback_loc;
 
             const start: usize, var end: usize = start: {
-                const token_start = tree.tokenStart(token);
+                const token_start = token.byteOffset(tree);
                 if (std.mem.startsWith(u8, tree.source[token_start..], "@\"")) {
                     break :start .{ token_start, token_start + 2 };
                 } else if (std.mem.startsWith(u8, tree.source[token_start..], "@") or std.mem.startsWith(u8, tree.source[token_start..], ".")) {
@@ -748,7 +743,7 @@ fn generateSortText(allocator: std.mem.Allocator, score: u4, label: []const u8) 
     return try allocator.print("{}_{s}", .{ score, label });
 }
 
-fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, dot_token_index: Ast.TokenIndex) error{OutOfMemory}!std.BufSet {
+fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, dot_token_index: Ast.Token.Index) error{OutOfMemory}!std.BufSet {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -761,41 +756,41 @@ fn collectUsedMembersSet(builder: *Builder, likely: EnumLiteralContext.Likely, d
     var used_members_set: std.BufSet = .init(builder.arena);
 
     var depth: usize = 0;
-    var i: Ast.TokenIndex = @max(dot_token_index, 2);
-    while (i > 0) : (i -= 1) {
-        switch (tree.tokenTag(i)) {
-            .r_brace => {
+    var i: Ast.Token.Index = @fromBackingInt(@max(@backingInt(dot_token_index), 2));
+    while (@backingInt(i) > 0) : (i = i.add(-1)) {
+        switch (i.tag(tree)) {
+            .@"}" => {
                 depth += 1;
             },
-            .l_brace => {
+            .@"{" => {
                 if (depth == 0) break;
                 depth -= 1;
             },
-            .equal, .equal_angle_bracket_right, .comma => {
+            .@"=", .@"=>", .@"," => {
                 if (depth > 0) continue;
-                if (tree.tokenTag(i - 1) == .identifier and tree.tokenTag(i - 2) == .period) {
-                    try used_members_set.insert(tree.tokenSlice(i - 1));
-                    i -= 1;
+                if (i.add(-1).tag(tree) == .name and i.add(-2).tag(tree) == .@".") {
+                    try used_members_set.insert(i.add(-1).slice(tree));
+                    i = i.add(-1);
                 }
             },
             else => {},
         }
     }
     depth = 0;
-    i = @max(dot_token_index, 2);
-    while (i < tree.tokens.len) : (i += 1) {
-        switch (tree.tokenTag(i)) {
-            .l_brace => {
+    i = @fromBackingInt(@max(@backingInt(dot_token_index), 2));
+    while (@backingInt(i) < tree.tokens.len()) : (i = i.add(1)) {
+        switch (i.tag(tree)) {
+            .@"{" => {
                 depth += 1;
             },
-            .r_brace => {
+            .@"}" => {
                 if (depth == 0) break;
                 depth -= 1;
             },
-            .equal, .equal_angle_bracket_right, .comma => {
+            .@"=", .@"=>", .@"," => {
                 if (depth > 0) continue;
-                if (tree.tokenTag(i - 1) == .identifier and tree.tokenTag(i - 2) == .period) {
-                    try used_members_set.insert(tree.tokenSlice(i - 1));
+                if (i.add(-1).tag(tree) == .name and i.add(-2).tag(tree) == .@".") {
+                    try used_members_set.insert(i.add(-1).slice(tree));
                 }
             },
             else => {},
@@ -811,8 +806,8 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
 
     const tree = &builder.orig_handle.tree;
 
-    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.period}, tree) orelse return;
-    if (dot_token_index < 2) return;
+    const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.@"."}, tree) orelse return;
+    if (@backingInt(dot_token_index) < 2) return;
 
     const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
     const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse return;
@@ -829,9 +824,9 @@ fn completeError(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
 
     const tree = &builder.orig_handle.tree;
 
-    const err_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.period}, tree) orelse return;
-    if (err_token_index < 2) return;
-    const dot_token_index = err_token_index + 1;
+    const err_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.@"."}, tree) orelse return;
+    if (@backingInt(err_token_index) < 2) return;
+    const dot_token_index = err_token_index.add(1);
 
     const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
     const dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return;
@@ -1166,79 +1161,77 @@ const EnumLiteralContext = struct {
     };
     likely: Likely,
     type_info: union(enum) {
-        identifier_token_index: Ast.TokenIndex,
+        identifier_token_index: Ast.Token.Index,
         expr_node_index: Ast.Node.Index,
-    } = .{ .identifier_token_index = 0 },
+    } = .{ .identifier_token_index = @fromBackingInt(0) },
     fn_arg_index: usize = 0,
     need_ret_type: bool = false,
 };
 
 fn getEnumLiteralContext(
     tree: *const Ast,
-    dot_token_index: Ast.TokenIndex,
+    dot_token_index: Ast.Token.Index,
     nodes: []const Ast.Node.Index,
 ) ?EnumLiteralContext {
     // Allow using `1.` (parser workaround)
-    var token_index = if (tree.tokenTag(dot_token_index - 1) == .number_literal)
-        (dot_token_index - 2)
-    else if (tree.tokenTag(dot_token_index - 1) == .keyword_try)
-        (dot_token_index - 2)
-    else
-        (dot_token_index - 1);
-    if (token_index == 0) return null;
+    var token_index = switch (dot_token_index.add(-1).tag(tree)) {
+        .number => dot_token_index.add(-2),
+        .@"try" => dot_token_index.add(-2),
+        else => dot_token_index.add(-1),
+    };
+    if (@backingInt(token_index) == 0) return null;
 
     var dot_context: EnumLiteralContext = .{ .likely = .enum_literal };
 
-    tag: switch (tree.tokenTag(token_index)) {
-        .equal => {
-            token_index -= 1;
-            dot_context.need_ret_type = tree.tokenTag(token_index) == .r_paren;
+    tag: switch (token_index.tag(tree)) {
+        .@"=" => {
+            token_index = token_index.add(-1);
+            dot_context.need_ret_type = token_index.tag(tree) == .@")";
             dot_context.likely = .enum_assignment;
             dot_context.type_info = .{ .identifier_token_index = token_index };
         },
-        .keyword_return => {
+        .@"return" => {
             dot_context.type_info = .{ .expr_node_index = getReturnTypeNode(tree, nodes) orelse return null };
             dot_context.likely = .enum_return;
         },
-        .keyword_break => {
+        .@"break" => {
             const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
-            dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
+            dot_context = getEnumLiteralContext(tree, nodes[i].firstToken(tree), nodes[i + 1 ..]) orelse return null;
             dot_context.likely = .enum_break;
         },
-        .identifier => {
-            if (tree.isTokenPrecededByTags(token_index, &.{ .keyword_break, .colon })) {
-                const break_label = tree.tokenSlice(token_index);
+        .name => {
+            if (ast.isTokenPrecededByTags(tree, token_index, &.{ .@"break", .@":" })) {
+                const break_label = token_index.slice(tree);
                 const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
-                dot_context = getEnumLiteralContext(tree, tree.firstToken(nodes[i]), nodes[i + 1 ..]) orelse return null;
+                dot_context = getEnumLiteralContext(tree, nodes[i].firstToken(tree), nodes[i + 1 ..]) orelse return null;
                 dot_context.likely = .enum_break;
-            } else if (tree.isTokenPrecededByTags(token_index, &.{ .keyword_continue, .colon })) {
-                const continue_label = tree.tokenSlice(token_index);
+            } else if (ast.isTokenPrecededByTags(tree, token_index, &.{ .@"continue", .@":" })) {
+                const continue_label = token_index.slice(tree);
                 const ancestor_switch = for (nodes) |node| {
-                    if (tree.fullSwitch(node)) |switch_node| {
-                        const switch_label_token = switch_node.label_token orelse continue;
-                        const switch_label = tree.tokenSlice(switch_label_token);
-                        if (std.mem.eql(u8, continue_label, switch_label)) {
-                            break switch_node;
-                        }
+                    const switch_expr: Ast.Expr.Switch = node.cast(.expr_switch, tree) orelse continue;
+                    const switch_label_token = switch_expr.label(tree) orelse continue;
+                    const switch_label = switch_label_token.slice(tree);
+                    if (std.mem.eql(u8, continue_label, switch_label)) {
+                        break switch_expr;
                     }
                 } else {
                     return null;
                 };
-                dot_context.type_info = .{ .expr_node_index = ancestor_switch.ast.condition };
+                dot_context.type_info = .{ .expr_node_index = ancestor_switch.condition.idx };
                 dot_context.likely = .enum_continue;
             }
         },
-        .equal_equal, .bang_equal => {
-            token_index -= 1;
+        .@"==", .@"!=" => {
+            token_index = token_index.add(-1);
             dot_context.likely = .enum_comparison;
             dot_context.type_info = .{ .identifier_token_index = token_index };
         },
-        .l_brace, .comma, .l_paren => {
+        .@"{", .@",", .@"(" => {
             dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return null;
         },
-        .ampersand => {
-            token_index -= 1;
-            continue :tag tree.tokenTag(token_index);
+        .@"&" => {
+            token_index = token_index.add(-1);
+            continue :tag token_index.tag(tree);
         },
         else => return null,
     }
@@ -1250,76 +1243,75 @@ fn getEnumLiteralContext(
 /// If the identifier is a `fn_name`, `fn_arg_index` is the index of the fn's param
 fn getSwitchOrStructInitContext(
     tree: *const Ast,
-    dot_index: Ast.TokenIndex,
+    dot_index: Ast.Token.Index,
     nodes: []const Ast.Node.Index,
 ) ?EnumLiteralContext {
     // at least 3 tokens should be present, `x{.`
-    if (dot_index < 2) return null;
+    if (@backingInt(dot_index) < 2) return null;
     // pedantic check (can be removed if the "generic exit" conditions below are made to cover more/all cases)
-    if (tree.tokenTag(dot_index) != .period) return null;
-    var upper_index = dot_index - 1;
+    if (dot_index.tag(tree) != .@".") return null;
+    var upper_index = dot_index.add(-1);
     // This prevents completions popping up for `x{.field.`
-    if (tree.tokenTag(upper_index) == .identifier) return null;
+    if (upper_index.tag(tree) == .name) return null;
     // This prevents completions popping up for `x{.field = .`, ie it would suggest `field` again
     // in this case `fn completeDot` would still provide enum completions
-    if (tree.tokenTag(upper_index) == .equal) return null;
+    if (upper_index.tag(tree) == .@"=") return null;
 
     var likely: EnumLiteralContext.Likely = .struct_field;
 
     var fn_arg_index: usize = 0;
     var need_ret_type: bool = false;
 
-    // The following logic is weird because we assume at least one .l_brace and/or .l_paren
+    // The following logic is weird because we assume at least one .@"{" and/or .@"("
     // => a couple of helpful constants:
     const even = 1; // we haven't found an opening brace or paren so the count is even
     const one_opening = 0; // an unmatched opening brace or paren makes the depth 0
 
-    // look for .identifier followed by .l_brace, skipping matches at braces_depth 'even'+
+    // look for .identifier followed by .@"{", skipping matches at braces_depth 'even'+
     var braces_depth: i32 = even;
     var parens_depth: i32 = even;
-    find_identifier: while (upper_index > 0) : (upper_index -= 1) {
-        switch (tree.tokenTag(upper_index)) {
-            .r_brace => braces_depth += 1,
-            .l_brace => {
+    find_identifier: while (@backingInt(upper_index) > 0) : (upper_index = upper_index.add(-1)) {
+        switch (upper_index.tag(tree)) {
+            .@"}" => braces_depth += 1,
+            .@"{" => {
                 braces_depth -= 1;
                 if (braces_depth != one_opening) continue;
-                upper_index -= 1;
-                switch (tree.tokenTag(upper_index)) {
+                upper_index = upper_index.add(-1);
+                switch (upper_index.tag(tree)) {
                     // `S{.`
-                    .identifier => break :find_identifier,
+                    .name => break :find_identifier,
                     // anon struct init `.{.`
-                    .period => {
-                        if (upper_index < 3) return null;
-                        upper_index -= 1;
-                        if (tree.tokenTag(upper_index) == .ampersand) upper_index -= 1; // `&.{.`
-                        switch (tree.tokenTag(upper_index)) {
-                            .keyword_break => { // `break .{.`
+                    .@"." => {
+                        if (@backingInt(upper_index) < 3) return null;
+                        upper_index = upper_index.add(-1);
+                        if (upper_index.tag(tree) == .@"&") upper_index = upper_index.add(1); // `&.{.`
+                        switch (upper_index.tag(tree)) {
+                            .@"break" => { // `break .{.`
                                 const i = ast.indexOfBreakTarget(tree, nodes, null) orelse return null;
-                                upper_index = tree.firstToken(nodes[i]);
-                                upper_index -= 1;
+                                upper_index = nodes[i].firstToken(tree);
+                                upper_index = upper_index.add(-1);
                             },
-                            .identifier => {
-                                if (tree.isTokenPrecededByTags(upper_index, &.{ .keyword_break, .colon })) { // `break :blk .{.`
-                                    const break_label = tree.tokenSlice(upper_index);
+                            .name => {
+                                if (ast.isTokenPrecededByTags(tree, upper_index, &.{ .@"break", .@":" })) { // `break :blk .{.`
+                                    const break_label = upper_index.slice(tree);
                                     const i = ast.indexOfBreakTarget(tree, nodes, break_label) orelse return null;
-                                    upper_index = tree.firstToken(nodes[i]);
-                                    upper_index -= 1;
-                                } else if (tree.isTokenPrecededByTags(upper_index, &.{ .keyword_continue, .colon })) { // `continue :blk .{.`
-                                    const continue_label = tree.tokenSlice(upper_index);
+                                    upper_index = nodes[i].firstToken(tree);
+                                    upper_index = upper_index.add(-1);
+                                } else if (ast.isTokenPrecededByTags(tree, upper_index, &.{ .@"continue", .@":" })) { // `continue :blk .{.`
+                                    const continue_label = upper_index.slice(tree);
                                     const ancestor_switch = for (nodes) |node| {
-                                        if (tree.fullSwitch(node)) |switch_node| {
-                                            const switch_label_token = switch_node.label_token orelse continue;
-                                            const switch_label = tree.tokenSlice(switch_label_token);
-                                            if (std.mem.eql(u8, continue_label, switch_label)) {
-                                                break switch_node;
-                                            }
+                                        const switch_expr: Ast.Expr.Switch = node.cast(.expr_switch, tree) orelse continue;
+                                        const switch_label_token = switch_expr.label(tree) orelse continue;
+                                        const switch_label = switch_label_token.slice(tree);
+                                        if (std.mem.eql(u8, continue_label, switch_label)) {
+                                            break switch_expr;
                                         }
                                     } else {
                                         return null;
                                     };
                                     return .{
                                         .likely = likely,
-                                        .type_info = .{ .expr_node_index = ancestor_switch.ast.condition },
+                                        .type_info = .{ .expr_node_index = ancestor_switch.condition.idx },
                                         .fn_arg_index = fn_arg_index,
                                         .need_ret_type = need_ret_type,
                                     };
@@ -1327,16 +1319,16 @@ fn getSwitchOrStructInitContext(
                             },
                             else => {},
                         }
-                        if (tree.tokenTag(upper_index) == .equal) { // `= .{.`
-                            upper_index -= 1; // eat the `=`
-                            switch (tree.tokenTag(upper_index)) {
-                                .identifier, // `const s: S = .{.`, `S{.name = .`
-                                .period_asterisk, //  `s.* = .{.`
+                        if (upper_index.tag(tree) == .@"=") { // `= .{.`
+                            upper_index = upper_index.add(-1); // eat the `=`
+                            switch (upper_index.tag(tree)) {
+                                .name, // `const s: S = .{.`, `S{.name = .`
+                                .@".*", //  `s.* = .{.`
                                 => break :find_identifier,
                                 else => return null,
                             }
                         }
-                        if (tree.tokenTag(upper_index) == .keyword_return) { // `return .{.`
+                        if (upper_index.tag(tree) == .@"return") { // `return .{.`
                             return .{
                                 .likely = likely,
                                 .type_info = .{ .expr_node_index = getReturnTypeNode(tree, nodes) orelse return null },
@@ -1348,64 +1340,64 @@ fn getSwitchOrStructInitContext(
                         fn_arg_index = 0;
                         braces_depth = even; // not actually looking for/expecting an uneven number of braces, just making use of the helpful const
                         parens_depth = even;
-                        while (upper_index > 0) : (upper_index -= 1) {
-                            switch (tree.tokenTag(upper_index)) {
-                                .r_brace => braces_depth += 1,
-                                .l_brace => {
+                        while (@backingInt(upper_index) > 0) : (upper_index = upper_index.add(-1)) {
+                            switch (upper_index.tag(tree)) {
+                                .@"}" => braces_depth += 1,
+                                .@"{" => {
                                     braces_depth -= 1;
                                     if (braces_depth == one_opening) return null;
                                 },
-                                .r_paren => parens_depth += 1,
-                                .l_paren => {
+                                .@")" => parens_depth += 1,
+                                .@"(" => {
                                     parens_depth -= 1;
-                                    if (parens_depth == one_opening and switch (tree.tokenTag(upper_index - 1)) {
-                                        .identifier,
-                                        .builtin,
+                                    if (parens_depth == one_opening and switch (upper_index.add(-1).tag(tree)) {
+                                        .name,
+                                        .name_builtin,
                                         => true,
                                         else => false,
                                     }) {
-                                        upper_index -= 1;
+                                        upper_index = upper_index.add(-1);
                                         break :find_identifier;
                                     }
                                 },
-                                .comma => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
+                                .@"," => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
                                     fn_arg_index += 1;
                                 },
-                                .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
+                                .@";" => return null, // generic exit; maybe also .keyword_(var/const)
                                 else => {},
                             }
                         }
                         return null;
                     },
                     // The opening brace is preceded by a r_paren => evaluate
-                    .r_paren => {
+                    .@")" => {
                         need_ret_type = true;
-                        if (upper_index < 1) return null;
-                        var token_index = upper_index - 1; // if `switch` we need the last token of the condition
+                        if (@backingInt(upper_index) < 1) return null;
+                        var token_index = upper_index.add(-1); // if `switch` we need the last token of the condition
                         parens_depth = even;
                         // Walk backwards counting parens until one_opening then check the preceding token's tag
-                        while (token_index > 0) : (token_index -= 1) {
-                            switch (tree.tokenTag(token_index)) {
-                                .r_paren => parens_depth += 1,
-                                .l_paren => {
+                        while (@backingInt(token_index) > 0) : (token_index = token_index.add(-1)) {
+                            switch (token_index.tag(tree)) {
+                                .@")" => parens_depth += 1,
+                                .@"(" => {
                                     parens_depth -= 1;
                                     if (parens_depth == one_opening)
-                                        switch (tree.tokenTag(token_index - 1)) {
-                                            .keyword_switch => {
+                                        switch (token_index.add(-1).tag(tree)) {
+                                            .@"switch" => {
                                                 likely = .switch_case;
-                                                upper_index -= 1; // eat the switch's .r_paren
+                                                upper_index = upper_index.add(-1); // eat the switch's .r_paren
                                                 break :find_identifier;
                                             },
-                                            .identifier,
+                                            .name,
                                             // .builtin, // `@f(){.`
                                             => {
-                                                upper_index = token_index - 1; // the fn name
+                                                upper_index = upper_index.add(-1); // the fn name
                                                 break :find_identifier;
                                             },
                                             else => return null,
                                         };
                                 },
-                                .semicolon => return null,
+                                .@";" => return null,
                                 else => {},
                             }
                         }
@@ -1414,18 +1406,18 @@ fn getSwitchOrStructInitContext(
                 }
             },
             // We're fishing for a `f(some, other{}, .<cursor>enum)`
-            .r_paren => parens_depth += 1,
-            .l_paren => {
+            .@")" => parens_depth += 1,
+            .@"(" => {
                 parens_depth -= 1;
                 if (parens_depth != one_opening) continue;
                 if (braces_depth != even) return null;
-                upper_index -= 1;
-                switch (tree.tokenTag(upper_index)) {
+                upper_index = upper_index.add(-1);
+                switch (upper_index.tag(tree)) {
                     // `f(.`
-                    .identifier,
-                    .builtin,
-                    .keyword_addrspace,
-                    .keyword_callconv,
+                    .name,
+                    .name_builtin,
+                    .@"addrspace",
+                    .@"callconv",
                     => {
                         likely = .enum_arg;
                         break :find_identifier;
@@ -1433,26 +1425,26 @@ fn getSwitchOrStructInitContext(
                     else => return null,
                 }
             },
-            .comma => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
+            .@"," => if (braces_depth == even and parens_depth == even) { // those only matter when outside of braces and before final '('
                 fn_arg_index += 1;
             },
-            // Have we arrived at an .identifier matching the criteria?
-            .identifier => switch (tree.tokenTag(upper_index + 1)) {
-                .l_brace => if (braces_depth == one_opening) break :find_identifier, // `S{.`
-                .l_paren => if (braces_depth == even and parens_depth == one_opening) { // `f(.`
+            // Have we arrived at an identifier matching the criteria?
+            .name => switch (upper_index.add(1).tag(tree)) {
+                .@"{" => if (braces_depth == one_opening) break :find_identifier, // `S{.`
+                .@"(" => if (braces_depth == even and parens_depth == one_opening) { // `f(.`
                     likely = .enum_arg;
                     break :find_identifier;
                 },
                 else => {},
             },
             // Exit conditions; generic exit, maybe also .keyword_(var/const)
-            .semicolon => if (braces_depth < even) return null, // the braces_depth check handles switch case blocks, ie `.a => {..;}, .`
+            .@";" => if (braces_depth < even) return null, // the braces_depth check handles switch case blocks, ie `.a => {..;}, .`
             else => {},
         }
     }
     // Maybe we simply ran out of tokens?
     // FIXME: This creates a 'blind spot' if the first node in a file is a .container_field_init
-    if (upper_index == 0) return null;
+    if (@backingInt(upper_index) == 0) return null;
 
     return .{
         .likely = likely,
@@ -1463,10 +1455,9 @@ fn getSwitchOrStructInitContext(
 }
 
 fn getReturnTypeNode(tree: *const Ast, nodes: []const Ast.Node.Index) ?Ast.Node.Index {
-    var func_buf: [1]Ast.Node.Index = undefined;
     for (nodes) |node| {
-        const func = tree.fullFnProto(&func_buf, node) orelse continue;
-        return func.ast.return_type.unwrap();
+        const func = node.cast(.type_fn, tree) orelse continue;
+        return func.return_type.idx;
     }
     return null;
 }
@@ -1491,7 +1482,7 @@ fn collectContainerFields(
     container: Analyser.Type,
     omit_members: std.BufSet,
 ) Analyser.Error!void {
-    const info, const type_maybe = info: switch (container.data) {
+    const info: Analyser.Type.Data.Container, const type_maybe = info: switch (container.data) {
         .container => |info| .{ info, null },
         .optional => |opt| {
             continue :info opt.data;
@@ -1521,16 +1512,13 @@ fn collectContainerFields(
         const name = offsets.tokenToSlice(tree, decl.nameToken(tree));
         if (omit_members.contains(name)) continue;
 
-        switch (tree.nodeTag(decl.ast_node)) {
-            .container_field_init,
-            .container_field_align,
-            .container_field,
-            => {
-                const field = tree.fullContainerField(decl.ast_node).?;
+        switch (decl.ast_node.get(tree)) {
+            .field => |field_index| {
+                const field = field_index.get(tree);
 
                 const kind: types.completion.Item.Kind = switch (container.data) {
                     .union_tag => .EnumMember,
-                    else => if (field.ast.tuple_like) .EnumMember else .Field,
+                    else => if (field.name == null) .EnumMember else .Field,
                 };
 
                 const insert_text, const insert_text_format: types.InsertTextFormat = insert_text: {
@@ -1560,9 +1548,9 @@ fn collectContainerFields(
                         break :insert_text .{ name, .PlainText };
 
                     const is_following_by_equal_token = switch (offsets.sourceIndexToTokenIndex(&builder.orig_handle.tree, builder.source_index)) {
-                        .none => |data| if (data.right) |right| builder.orig_handle.tree.tokenTag(right) == .equal else false,
-                        .one => |token| token + 1 < builder.orig_handle.tree.tokens.len and builder.orig_handle.tree.tokenTag(token + 1) == .equal,
-                        .between => |data| builder.orig_handle.tree.tokenTag(data.right) == .equal,
+                        .none => |data| if (data.right) |right| right.tag(&builder.orig_handle.tree) == .@"=" else false,
+                        .one => |token| @backingInt(token.add(1)) < builder.orig_handle.tree.tokens.len() and token.add(1).tag(&builder.orig_handle.tree) == .@"=",
+                        .between => |data| data.right.tag(&builder.orig_handle.tree) == .@"=",
                     };
                     if (is_following_by_equal_token)
                         break :insert_text .{ name, .PlainText };
@@ -1578,14 +1566,14 @@ fn collectContainerFields(
                 const detail = detail: {
                     const type_str = if (maybe_resolved_ty) |ty|
                         try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false })
-                    else if (field.ast.type_expr.unwrap()) |type_expr| typ: {
-                        const type_str = offsets.nodeToSlice(tree, type_expr);
+                    else typ: {
+                        const type_str = offsets.nodeToSlice(tree, field.type.idx);
                         if (std.mem.eql(u8, name, type_str) and kind == .EnumMember) break :detail null;
                         break :typ type_str;
-                    } else break :detail null;
-                    if (field.ast.value_expr.unwrap()) |value_expr| {
+                    };
+                    if (field.init) |value_expr| {
                         if (kind == .Field) score += 1;
-                        const value_str = offsets.nodeToSlice(tree, value_expr);
+                        const value_str = offsets.nodeToSlice(tree, value_expr.idx);
                         break :detail try builder.arena.print("{s} = {s}", .{ type_str, value_str });
                     } else {
                         break :detail try builder.arena.print("{s}", .{type_str});
@@ -1601,11 +1589,7 @@ fn collectContainerFields(
                     .sortText = try generateSortText(builder.arena, score, name),
                 });
             },
-            .global_var_decl,
-            .local_var_decl,
-            .simple_var_decl,
-            .aligned_var_decl,
-            => {
+            .var_local, .var_global => {
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
@@ -1616,12 +1600,7 @@ fn collectContainerFields(
                 if (!expected_ty.data.container.scope_handle.eql(container.data.container.scope_handle)) continue;
                 try declToCompletion(builder, decl_handle);
             },
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => {
+            .type_fn, .decl_fn => {
                 if (container.data != .container) continue;
                 if (!likely.allowsDeclLiterals()) continue;
                 // decl literal
@@ -1634,7 +1613,6 @@ fn collectContainerFields(
                 const completion_item = try functionTypeCompletion(builder, name, container, resolved_ty) orelse continue;
                 try builder.completions.append(builder.arena, completion_item);
             },
-            else => {},
         }
     }
 }
@@ -1667,8 +1645,8 @@ fn collectContainerNodes(
     const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(gpa, &handle.tree, source_index);
     defer gpa.free(nodes);
 
-    switch (handle.tree.nodeTag(nodes[0])) {
-        .field_access, .enum_literal => {
+    switch (nodes[0].tag(&handle.tree)) {
+        .expr_dot_access, .leaf_enum_literal => {
             if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
                 try collectFieldAccessTypes(builder, dot_context, ty, &types_with_handles);
                 return types_with_handles.keys();
@@ -1677,24 +1655,19 @@ fn collectContainerNodes(
         else => {},
     }
 
-    if (nodes.len > 1) {
-        switch (handle.tree.nodeTag(nodes[1])) {
-            .global_var_decl,
-            .local_var_decl,
-            .simple_var_decl,
-            .aligned_var_decl,
-            => {
-                const var_decl = handle.tree.fullVarDecl(nodes[1]).?;
-                if (nodes[0].toOptional() == var_decl.ast.type_node) {
-                    if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
-                        _ = try ty.getAllTypesWithHandlesArraySet(builder.analyser, &types_with_handles);
-                        return types_with_handles.keys();
-                    }
-                }
-            },
-            else => {},
-        }
+    blk: {
+        if (nodes.len <= 1) break :blk;
+        const var_type_expr = switch (nodes[1].tag(&handle.tree)) {
+            inline .var_local, .var_global => |t| nodes[1].cast(t, &handle.tree).?.type,
+            else => break :blk,
+        } orelse break :blk;
+        if (nodes[0] != var_type_expr.idx) break :blk;
+        const ty = try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle)) orelse break :blk;
+        _ = try ty.getAllTypesWithHandlesArraySet(builder.analyser, &types_with_handles);
+        return types_with_handles.keys();
     }
+
+    if (nodes.len > 1) {}
 
     const position_context = try Analyser.getPositionContext(builder.arena, &handle.tree, source_index, false);
     switch (position_context) {
@@ -1849,7 +1822,7 @@ fn collectEnumLiteralContainerNodes(
 ) Analyser.Error!void {
     const analyser = builder.analyser;
     const alleged_field_name = offsets.locToSlice(handle.tree.source, offsets.identifierIndexToLoc(handle.tree.source, loc.start + 1, .name));
-    const dot_index = offsets.sourceIndexToTokenIndex(&handle.tree, loc.start).pickPreferred(&.{.period}, &handle.tree) orelse return;
+    const dot_index = offsets.sourceIndexToTokenIndex(&handle.tree, loc.start).pickPreferred(&.{.@"."}, &handle.tree) orelse return;
     const el_dot_context = getSwitchOrStructInitContext(&handle.tree, dot_index, nodes) orelse return;
     const containers = try collectContainerNodes(builder, handle, el_dot_context);
     for (containers) |container| {
@@ -1864,17 +1837,17 @@ fn collectEnumLiteralContainerNodes(
 
 fn collectKeywordFnContainerNodes(
     builder: *Builder,
-    token: Ast.TokenIndex,
+    token: Ast.Token.Index,
     dot_context: EnumLiteralContext,
     types_with_handles: *Analyser.Type.ArraySet,
 ) Analyser.Error!void {
     const builtin_type_name: []const u8 = name: {
-        switch (builder.orig_handle.tree.tokenTag(token)) {
-            .keyword_addrspace => switch (dot_context.fn_arg_index) {
+        switch (token.tag(&builder.orig_handle.tree)) {
+            .@"addrspace" => switch (dot_context.fn_arg_index) {
                 0 => break :name "AddressSpace",
                 else => return,
             },
-            .keyword_callconv => switch (dot_context.fn_arg_index) {
+            .@"callconv" => switch (dot_context.fn_arg_index) {
                 0 => break :name "CallingConvention",
                 else => return,
             },
