@@ -95,7 +95,7 @@ fn labelReferences(
 }
 
 const Builder = struct {
-    locations: std.ArrayList(types.Location) = .empty,
+    reference_token_map: std.array_hash_map.Auto(*DocumentStore.Handle, std.ArrayList(Ast.TokenIndex)) = .empty,
     /// this is the declaration we are searching for
     target_symbol: Analyser.DeclWithHandle,
     target_symbol_name: []const u8,
@@ -115,10 +115,45 @@ const Builder = struct {
             if (self.did_add_target_symbol) return;
             self.did_add_target_symbol = true;
         }
-        try self.locations.append(self.analyser.arena, .{
-            .uri = handle.uri.raw,
-            .range = offsets.tokenToRange(&handle.tree, token_index, self.encoding),
-        });
+        const gop = try self.reference_token_map.getOrPut(self.analyser.arena, handle);
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
+        try gop.value_ptr.append(self.analyser.arena, token_index);
+    }
+
+    fn finish(self: *Builder) error{OutOfMemory}!std.ArrayList(types.Location) {
+        var locations: std.ArrayList(types.Location) = .empty;
+        var mappings: std.ArrayList(offsets.multiple.IndexToPositionMapping) = .empty;
+        var ranges: std.ArrayList(offsets.Range) = .empty;
+        for (self.reference_token_map.keys(), self.reference_token_map.values()) |ref_handle, tokens| {
+            try mappings.ensureTotalCapacity(self.analyser.arena, tokens.items.len * 2);
+            defer mappings.clearRetainingCapacity();
+            try ranges.ensureTotalCapacity(self.analyser.arena, tokens.items.len);
+            defer ranges.clearRetainingCapacity();
+            for (tokens.items) |token| {
+                const loc = offsets.tokenToLoc(&ref_handle.tree, token);
+                const range = ranges.addOneAssumeCapacity();
+                mappings.addManyAsArrayAssumeCapacity(2).* = .{ .{
+                    .output = &range.start,
+                    .source_index = loc.start,
+                }, .{
+                    .output = &range.end,
+                    .source_index = loc.end,
+                } };
+            }
+            offsets.multiple.indexToPositionWithMappings(
+                ref_handle.tree.source,
+                mappings.items,
+                self.encoding,
+            );
+            try locations.ensureUnusedCapacity(self.analyser.arena, ranges.items.len);
+            for (ranges.items) |range| {
+                locations.appendAssumeCapacity(.{
+                    .uri = ref_handle.uri.raw,
+                    .range = range,
+                });
+            }
+        }
+        return locations;
     }
 
     fn collectReferences(self: *Builder, handle: *DocumentStore.Handle, node: Ast.Node.Index) Analyser.Error!void {
@@ -368,7 +403,7 @@ fn symbolReferences(
         }
     }
 
-    return builder.locations;
+    return builder.finish();
 }
 
 fn gatherWorkspaceReferenceCandidates(
