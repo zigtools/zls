@@ -161,18 +161,26 @@ const Builder = struct {
         defer tracy_zone.end();
 
         const arena = self.analyser.arena;
-        try referenceNode(self, handle, node);
+        try referenceNode(self, handle, node, &.{});
+        var ancestors: std.ArrayList(Ast.Node.Index) = .empty;
         var walker: ast.Walker = try .init(arena, &handle.tree, node);
         defer walker.deinit(arena);
-        while (try walker.nextIgnoreClose(arena, &handle.tree)) |child| {
-            try referenceNode(self, handle, child);
-        }
+        while (try walker.next(arena, &handle.tree)) |event| switch (event) {
+            .open => |n| {
+                try ancestors.insert(arena, 0, walker.parentNode());
+                try referenceNode(self, handle, n, ancestors.items);
+            },
+            .close => if (ancestors.items.len != 0) {
+                _ = ancestors.orderedRemove(0);
+            },
+        };
     }
 
     fn referenceNode(
         builder: *Builder,
         handle: *DocumentStore.Handle,
         node: Ast.Node.Index,
+        ancestors: []const Ast.Node.Index,
     ) Analyser.Error!void {
         const tree = &handle.tree;
         var candidate: Analyser.DeclWithHandle, const name_token = candidate: switch (tree.nodeTag(node)) {
@@ -234,30 +242,11 @@ const Builder = struct {
                     const name = offsets.identifierTokenToNameSlice(tree, name_token);
                     if (!std.mem.eql(u8, name, builder.target_symbol_name)) continue;
 
-                    const nodes = switch (tree.nodeTag(node)) {
-                        .struct_init_dot,
-                        .struct_init_dot_comma,
-                        .struct_init_dot_two,
-                        .struct_init_dot_two_comma,
-                        => try ast.nodesOverlappingIndex(
-                            builder.analyser.arena,
-                            tree,
-                            tree.tokenStart(name_token),
-                        ),
-                        // if this isn't an anonymous struct the type can be determined from the `T{}` directly
-                        .struct_init_one,
-                        .struct_init_one_comma,
-                        .struct_init,
-                        .struct_init_comma,
-                        => &.{node},
-                        else => unreachable,
-                    };
-
                     const candidate, _ = try builder.analyser.lookupSymbolFieldInit(
                         handle,
                         name,
-                        nodes[0],
-                        nodes[1..],
+                        node,
+                        ancestors,
                     ) orelse return;
 
                     // if we get here then we know that the name of the field matched
@@ -271,7 +260,7 @@ const Builder = struct {
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
                 if (!std.mem.eql(u8, name, builder.target_symbol_name)) return;
-                const candidate, _ = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
+                const candidate, _ = try builder.analyser.lookupSymbolFieldInit(handle, name, node, ancestors) orelse return;
                 break :candidate .{ candidate, name_token };
             },
             .global_var_decl,
