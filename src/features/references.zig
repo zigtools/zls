@@ -98,6 +98,8 @@ const Builder = struct {
     locations: std.ArrayList(types.Location) = .empty,
     /// this is the declaration we are searching for
     target_symbol: Analyser.DeclWithHandle,
+    target_symbol_name: []const u8,
+    target_symbol_name_token: Ast.TokenIndex,
     /// the decl is local to a function, block, etc
     local_only_decl: bool,
     /// Whether the `target_symbol` has been added
@@ -108,7 +110,7 @@ const Builder = struct {
 
     fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
         if (self.target_symbol.handle == handle and
-            self.target_symbol.nameToken() == token_index)
+            self.target_symbol_name_token == token_index)
         {
             if (self.did_add_target_symbol) return;
             self.did_add_target_symbol = true;
@@ -138,11 +140,6 @@ const Builder = struct {
         node: Ast.Node.Index,
     ) Analyser.Error!void {
         const tree = &handle.tree;
-        const target_symbol_name = offsets.identifierTokenToNameSlice(
-            &builder.target_symbol.handle.tree,
-            builder.target_symbol.nameToken(),
-        );
-
         var candidate: Analyser.DeclWithHandle, const name_token = candidate: switch (tree.nodeTag(node)) {
             .identifier,
             .test_decl,
@@ -164,7 +161,7 @@ const Builder = struct {
                     if (std.zig.isPrimitive(name)) return;
                 }
 
-                if (!std.mem.eql(u8, name, target_symbol_name)) return;
+                if (!std.mem.eql(u8, name, builder.target_symbol_name)) return;
 
                 const candidate = try builder.analyser.lookupSymbolGlobal(
                     handle,
@@ -177,7 +174,7 @@ const Builder = struct {
                 if (builder.local_only_decl) return;
                 const lhs_node, const field_token = tree.nodeData(node).node_and_token;
                 const name = offsets.identifierTokenToNameSlice(tree, field_token);
-                if (!std.mem.eql(u8, name, target_symbol_name)) return;
+                if (!std.mem.eql(u8, name, builder.target_symbol_name)) return;
 
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
@@ -200,7 +197,7 @@ const Builder = struct {
                 for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                     const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                     const name = offsets.identifierTokenToNameSlice(tree, name_token);
-                    if (!std.mem.eql(u8, name, target_symbol_name)) continue;
+                    if (!std.mem.eql(u8, name, builder.target_symbol_name)) continue;
 
                     const nodes = switch (tree.nodeTag(node)) {
                         .struct_init_dot,
@@ -238,7 +235,7 @@ const Builder = struct {
                 if (builder.local_only_decl) return;
                 const name_token = tree.nodeMainToken(node);
                 const name = offsets.identifierTokenToNameSlice(&handle.tree, name_token);
-                if (!std.mem.eql(u8, name, target_symbol_name)) return;
+                if (!std.mem.eql(u8, name, builder.target_symbol_name)) return;
                 const candidate, _ = try builder.analyser.getSymbolEnumLiteral(handle, tree.tokenStart(name_token), name) orelse return;
                 break :candidate .{ candidate, name_token };
             },
@@ -252,7 +249,7 @@ const Builder = struct {
 
                 const alias_name_token = var_decl.ast.mut_token + 1;
                 const alias_name = offsets.identifierTokenToNameSlice(&handle.tree, alias_name_token);
-                if (!std.mem.eql(u8, alias_name, target_symbol_name)) return;
+                if (!std.mem.eql(u8, alias_name, builder.target_symbol_name)) return;
 
                 const init_node = var_decl.ast.init_node.unwrap() orelse return;
                 if (tree.tokenTag(var_decl.ast.mut_token) != .keyword_const) return;
@@ -260,7 +257,7 @@ const Builder = struct {
                 if (tree.nodeTag(init_node) != .field_access) return;
                 const lhs_node, const field_token = tree.nodeData(init_node).node_and_token;
                 const field_name = offsets.identifierTokenToNameSlice(tree, field_token);
-                if (!std.mem.eql(u8, field_name, target_symbol_name)) return;
+                if (!std.mem.eql(u8, field_name, builder.target_symbol_name)) return;
 
                 const lhs = try builder.analyser.resolveTypeOfNode(.of(lhs_node, handle)) orelse return;
                 const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
@@ -338,6 +335,11 @@ fn symbolReferences(
     var builder: Builder = .{
         .analyser = analyser,
         .target_symbol = target_symbol,
+        .target_symbol_name = offsets.identifierTokenToNameSlice(
+            &target_symbol.handle.tree,
+            target_symbol.nameToken(),
+        ),
+        .target_symbol_name_token = target_symbol.nameToken(),
         .local_only_decl = local_node != null,
         .resolve_aliases = resolve_aliases,
         .encoding = encoding,
