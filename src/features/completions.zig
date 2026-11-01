@@ -700,7 +700,9 @@ fn completeFieldAccess(builder: *Builder, loc: offsets.Loc) Analyser.Error!void 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    builder.analyser.collect_callsite_references = true;
     const ty = try builder.analyser.getFieldAccessType(builder.orig_handle, builder.source_index, loc) orelse return;
+    builder.analyser.collect_callsite_references = false;
     try typeToCompletion(builder, ty);
 }
 
@@ -1051,6 +1053,9 @@ pub fn @"textDocument/completion"(server: *Server, arena: std.mem.Allocator, req
 
     var analyser = server.initAnalyser(arena, handle);
     defer analyser.deinit();
+    // We only set this in completeFieldAccess to avoid the work when resolving lots of functions with anytype parameters
+    // which can be common in translate-c files.
+    analyser.collect_callsite_references = false;
 
     std.debug.assert(source_index <= handle.tree.source.len);
 
