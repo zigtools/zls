@@ -4,7 +4,7 @@ The ZLS follows the same policy as the [Zig project](https://ziglang.org/code-of
 
 # Discord
 
-Join the [ZLS discord server](https://discord.gg/5m5U3qpUhk) if you'd like to coordinate with other contributors.
+Join the [ZLS discord server](https://discord.gg/5m5U3qpUhk) if you'd like to coordinate with other contributors. We also host a monthly meeting where we share the state of the project and onboard new contributors.
 
 # Compile From Source
 
