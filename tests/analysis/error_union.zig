@@ -19,3 +19,8 @@ const ErrorUnionUnknownError = Unknown!u32;
 
 const ErrorUnionUnknownPayload = Error!Unknown;
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ (type)(error{Foo,Bar}!(unknown type))
+
+const ErrorSet = error{A} || error{B};
+const ErrorSetWithUnknown = error{A} || undefined.Unknown;
+const ErrorSetWithUnknown2 = undefined.Unknown || error{A};
+const AllUnknown = undefined.Unknown || undefined.Unknown; // error{ ... }

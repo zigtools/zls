@@ -110,6 +110,7 @@ pub const Key = union(enum) {
     pub const ErrorSet = struct {
         owner_decl: Decl.OptionalIndex,
         names: StringSlice,
+        has_unknown: Index = .bool_type,
     };
 
     pub const Function = struct {
@@ -3544,8 +3545,8 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
 }
 
 pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
-    assert(ip.zigTypeTag(a_ty) == .error_set);
-    assert(ip.zigTypeTag(b_ty) == .error_set);
+    assert(ip.zigTypeTag(a_ty) == .error_set or ip.isUnknown(a_ty));
+    assert(ip.zigTypeTag(b_ty) == .error_set or ip.isUnknown(b_ty));
 
     // Anything merged with anyerror is anyerror.
     if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
@@ -3574,6 +3575,7 @@ pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!
         .error_set_type = .{
             .owner_decl = .none,
             .names = try ip.getStringSlice(set.keys()),
+            .has_unknown = if (ip.isUnknown(a_ty) or ip.isUnknown(b_ty)) Index.bool_true else Index.bool_false,
         },
     });
 }
@@ -4040,6 +4042,12 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
                 if (i != 0) try writer.writeByte(',');
                 const name = error_set_info.names.at(@intCast(i), ip);
                 try writer.print("{f}", .{ip.fmtId(name)});
+            }
+            if (error_set_info.has_unknown == .bool_true) {
+                if (error_set_info.names.len > 0) {
+                    try writer.writeByte(',');
+                }
+                try writer.writeAll("...");
             }
             try writer.writeByte('}');
         },

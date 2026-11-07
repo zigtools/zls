@@ -2253,7 +2253,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 try strings.put(analyser.gpa, index, {});
             }
             const names = try analyser.ip.getStringSlice(strings.keys());
-            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names } });
+            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names, .has_unknown = .bool_true } }); // TODO has_unknown
+            log.debug("DEBUG: {}", .{ip_index});
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2812,10 +2813,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
             const name_index = try analyser.ip.string_pool.getOrPutString(analyser.store.io, analyser.gpa, name);
 
-            const error_set_type = try analyser.ip.get(.{ .error_set_type = .{
-                .owner_decl = .none,
-                .names = try analyser.ip.getStringSlice(&.{name_index}),
-            } });
+            const error_set_type = try analyser.ip.get(.{
+                .error_set_type = .{
+                    .owner_decl = .none,
+                    .names = try analyser.ip.getStringSlice(&.{name_index}),
+                    .has_unknown = .bool_true, // TODO not true
+                },
+            });
             const error_value = try analyser.ip.get(.{ .error_value = .{
                 .ty = error_set_type,
                 .error_tag_name = name_index,
