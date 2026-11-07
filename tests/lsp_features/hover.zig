@@ -8,6 +8,245 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
+test "optional_payload" {
+    try testHover(
+        \\fn bar() void {
+        \\    const foo: ?u8 = 8;
+        \\    while (foo) |num<cursor>| {}
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(u8)
+        \\```
+        \\
+        \\`num` captures the unwrapped value of `foo` when it is not null.
+    );
+    try testHover(
+        \\fn bar() void {
+        \\    const foo: ?u8 = 8;
+        \\    if (foo) |*num<cursor>| {}
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(*u8)
+        \\```
+        \\
+        \\`num` captures a pointer to the unwrapped value of `foo` when it is not null.
+    );
+}
+
+test "error_union_payload" {
+    try testHover(
+        \\fn func() !u8 { return 8; }
+        \\
+        \\fn bar() void {
+        \\    const foo = func();
+        \\    while (foo) |num<cursor>| {} else |_| {}
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(u8)
+        \\```
+        \\
+        \\`num` captures the successful value of `foo` when it is not an error.
+    );
+    try testHover(
+        \\fn func() !u8 { return 8; }
+        \\
+        \\fn bar() void {
+        \\    const foo = func();
+        \\    if (foo) |*num<cursor>| {} else |_| {}
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(*u8)
+        \\```
+        \\
+        \\`num` captures a pointer to the successful value of `foo` when it is not an error.
+    );
+}
+
+test "error_union_error" {
+    try testHover(
+        \\fn func() anyerror!u8 { return 8; }
+        \\
+        \\fn bar() void {
+        \\    const foo = func();
+        \\    while (foo) |_| {} else |failed<cursor>| {}
+        \\}
+    ,
+        \\```zig
+        \\failed
+        \\```
+        \\```zig
+        \\(anyerror)
+        \\```
+        \\
+        \\`failed` captures the error handled by this construct.
+    );
+    try testHover(
+        \\fn func() anyerror!u8 { return 8; }
+        \\
+        \\fn bar() void {
+        \\    const foo = func();
+        \\    if (foo) |_| {} else |failed<cursor>| {}
+        \\}
+    ,
+        \\```zig
+        \\failed
+        \\```
+        \\```zig
+        \\(anyerror)
+        \\```
+        \\
+        \\`failed` captures the error handled by this construct.
+    );
+    try testHover(
+        \\fn func() anyerror!u8 { return 8; }
+        \\
+        \\fn bar() void {
+        \\    const foo = func() catch |failed<cursor>| {};
+        \\}
+    ,
+        \\```zig
+        \\failed
+        \\```
+        \\```zig
+        \\(anyerror)
+        \\```
+        \\
+        \\`failed` captures the error handled by this construct.
+    );
+}
+
+test "for_loop_payload" {
+    try testHover(
+        \\fn foo() void {
+        \\    const numbers = [_]u8{ 1, 2, 3 };
+        \\    for (numbers) |num<cursor>| {}
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(u8)
+        \\```
+        \\
+        \\`num` captures the current element or range value for this iteration.
+    );
+    try testHover(
+        \\fn foo(numbers: []u8) void {
+        \\    for (numbers) |*num<cursor>| {}
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(*u8)
+        \\```
+        \\
+        \\`num` captures a pointer to the current element for this iteration.
+    );
+}
+
+test "switch_payload" {
+    try testHover(
+        \\const letter = enum { a, b };
+        \\const Bar = union(letter) { a: u8, b: u16, };
+        \\
+        \\fn foo(bar: Bar) void {
+        \\    switch (bar) {
+        \\        .a => |num<cursor>| {},
+        \\        else => {},
+        \\    }
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(u8)
+        \\```
+        \\
+        \\`num` captures the value associated with the matching switch case.
+    );
+    try testHover(
+        \\const letter = enum { a, b };
+        \\const Bar = union(letter) { a: u8, b: u16, };
+        \\
+        \\fn foo(bar: *Bar) void {
+        \\    switch (bar.*) {
+        \\        .a => |*num<cursor>| {},
+        \\        else => {},
+        \\    }
+        \\}
+    ,
+        \\```zig
+        \\num
+        \\```
+        \\```zig
+        \\(*u8)
+        \\```
+        \\
+        \\`num` captures a pointer to the value associated with the matching switch case.
+    );
+}
+
+test "switch_inline_tag_payload" {
+    try testHover(
+        \\const letter = enum { a, b };
+        \\const Bar = union(letter) { a: u8, b: u16, };
+        \\
+        \\fn foo(bar: Bar) void {
+        \\    switch (bar) { inline .a => |_, tag<cursor>| {}, else => {}, }
+        \\}
+    ,
+        \\```zig
+        \\tag
+        \\```
+        \\```zig
+        \\(letter)
+        \\```
+        \\
+        \\Go to [letter](untitled:///Untitled-0.zig#L1)
+        \\
+        \\`tag` captures the matched tag for this inline switch case.
+    );
+    try testHover(
+        \\const letter = enum { a, b };
+        \\const Bar = union(letter) { a: u8, b: u16, };
+        \\
+        \\fn foo(bar: Bar) void {
+        \\    switch (bar) { inline else => |_, tag<cursor>| {} }
+        \\}
+    ,
+        \\```zig
+        \\tag
+        \\```
+        \\```zig
+        \\(letter)
+        \\```
+        \\
+        \\Go to [letter](untitled:///Untitled-0.zig#L1)
+        \\
+        \\`tag` captures the matched tag for this inline switch case.
+    );
+}
+
 test "primitive" {
     try testHover(
         \\const foo = bool<cursor>;
@@ -675,6 +914,8 @@ test "block label" {
         \\```zig
         \\(i32)
         \\```
+        \\
+        \\`baz` labels this block or loop so control-flow statements can target it.
     );
     try testHover(
         \\const foo: i32 = undefined;
@@ -688,6 +929,8 @@ test "block label" {
         \\```zig
         \\(i32)
         \\```
+        \\
+        \\`baz` labels this block or loop so control-flow statements can target it.
     );
 }
 
