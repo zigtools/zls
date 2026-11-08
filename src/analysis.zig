@@ -5407,7 +5407,7 @@ pub fn getPositionContext(
             if (std.mem.startsWith(u8, tree.source[tok.loc.start..], "@\"")) {
                 tok.tag = .identifier;
                 tok.loc = .{ .start = tok.loc.start, .end = @min(line_loc.end, tree.tokenStart(current_token + 1)) };
-            } else if (std.mem.startsWith(u8, tree.source[tok.loc.start..], "@")) {
+            } else {
                 tok.tag = .builtin;
                 tok.loc = .{ .start = tok.loc.start, .end = tok.loc.start + 1 };
             }
