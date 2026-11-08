@@ -435,6 +435,7 @@ pub const Key = union(enum) {
                 const b_info = b.error_set_type;
 
                 if (a_info.owner_decl != b_info.owner_decl) return false;
+                if (a_info.has_unknown != b_info.has_unknown) return false;
 
                 if (a_info.names.len != b_info.names.len) return false;
 
@@ -3545,39 +3546,67 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
 }
 
 pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
-    assert(ip.zigTypeTag(a_ty) == .error_set or ip.isUnknown(a_ty));
-    assert(ip.zigTypeTag(b_ty) == .error_set or ip.isUnknown(b_ty));
+    const has_unknown = ip.isUnknown(a_ty) or ip.isUnknown(b_ty);
 
-    // Anything merged with anyerror is anyerror.
-    if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
-        return .anyerror_type;
+    if (has_unknown) {
+        var set: std.array_hash_map.Auto(String, void) = .empty;
+        defer set.deinit(ip.gpa);
+
+        if (!ip.isUnknown(a_ty)) {
+            assert(ip.zigTypeTag(a_ty) == .error_set);
+            const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(ip.gpa, ip);
+            defer ip.gpa.free(a_names);
+            try set.ensureTotalCapacity(ip.gpa, a_names.len);
+            for (a_names) |name| set.putAssumeCapacity(name, {});
+        }
+        if (!ip.isUnknown(b_ty)) {
+            assert(ip.zigTypeTag(b_ty) == .error_set);
+            const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
+            defer ip.gpa.free(b_names);
+            try set.ensureTotalCapacity(ip.gpa, b_names.len);
+            for (b_names) |name| set.putAssumeCapacity(name, {});
+        }
+
+        ip.string_pool.sortStrings(ip.io, set.keys());
+
+        return try ip.get(.{
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = try ip.getStringSlice(set.keys()),
+                .has_unknown = .bool_true,
+            },
+        });
+    } else {
+        assert(ip.zigTypeTag(a_ty) == .error_set);
+        assert(ip.zigTypeTag(b_ty) == .error_set);
+
+        // Anything merged with anyerror is anyerror.
+        if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
+            return .anyerror_type;
+        }
+
+        if (a_ty == b_ty) return a_ty;
+
+        const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(ip.gpa, ip);
+        defer ip.gpa.free(a_names);
+
+        const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
+        defer ip.gpa.free(b_names);
+
+        var set: std.array_hash_map.Auto(String, void) = .empty;
+        defer set.deinit(ip.gpa);
+
+        try set.ensureTotalCapacity(ip.gpa, a_names.len + b_names.len);
+
+        for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
+        for (b_names) |name| set.putAssumeCapacity(name, {});
+
+        ip.string_pool.sortStrings(ip.io, set.keys());
+
+        return try ip.get(.{
+            .error_set_type = .{ .owner_decl = .none, .names = try ip.getStringSlice(set.keys()), .has_unknown = .bool_false },
+        });
     }
-
-    if (a_ty == b_ty) return a_ty;
-
-    const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(ip.gpa, ip);
-    defer ip.gpa.free(a_names);
-
-    const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
-    defer ip.gpa.free(b_names);
-
-    var set: std.array_hash_map.Auto(String, void) = .empty;
-    defer set.deinit(ip.gpa);
-
-    try set.ensureTotalCapacity(ip.gpa, a_names.len + b_names.len);
-
-    for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
-    for (b_names) |name| set.putAssumeCapacity(name, {});
-
-    ip.string_pool.sortStrings(ip.io, set.keys());
-
-    return try ip.get(.{
-        .error_set_type = .{
-            .owner_decl = .none,
-            .names = try ip.getStringSlice(set.keys()),
-            .has_unknown = if (ip.isUnknown(a_ty) or ip.isUnknown(b_ty)) Index.bool_true else Index.bool_false,
-        },
-    });
 }
 
 /// Asserts the type is a vector or tuple.
@@ -4047,7 +4076,7 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
                 if (error_set_info.names.len > 0) {
                     try writer.writeByte(',');
                 }
-                try writer.writeAll("...");
+                try writer.writeAll(" ... ");
             }
             try writer.writeByte('}');
         },

@@ -2233,8 +2233,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
         .merge_error_sets => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse return null;
-            const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse return null;
+            const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse .unknown_type;
+            const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse .unknown_type;
             const ip_index = try analyser.ip.errorSetMerge(lhs_index, rhs_index);
             return Type.fromIP(analyser, .type_type, ip_index);
         },
@@ -2253,8 +2253,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 try strings.put(analyser.gpa, index, {});
             }
             const names = try analyser.ip.getStringSlice(strings.keys());
-            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names, .has_unknown = .bool_true } }); // TODO has_unknown
-            log.debug("DEBUG: {}", .{ip_index});
+            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names, .has_unknown = .bool_false } });
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2817,7 +2816,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 .error_set_type = .{
                     .owner_decl = .none,
                     .names = try analyser.ip.getStringSlice(&.{name_index}),
-                    .has_unknown = .bool_true, // TODO not true
+                    .has_unknown = .bool_false,
                 },
             });
             const error_value = try analyser.ip.get(.{ .error_value = .{
