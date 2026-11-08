@@ -3223,7 +3223,12 @@ fn isUnknownDeepInternal(
         },
         .optional_type => |optional_info| try ip.isUnknownDeepInternal(optional_info.payload_type, set),
         .error_union_type => |error_union_info| try ip.isUnknownDeepInternal(error_union_info.payload_type, set),
-        .error_set_type => false,
+        .error_set_type => |error_set_info| {
+            if (error_set_info.has_unknown == .bool_true) {
+                return true;
+            }
+            return false;
+        },
         .enum_type => |enum_index| {
             const enum_info = ip.getEnum(enum_index);
             for (enum_info.values.keys()) |val| {
@@ -3546,7 +3551,7 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
 }
 
 pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
-    const has_unknown = ip.isUnknown(a_ty) or ip.isUnknown(b_ty);
+    const has_unknown = try ip.isUnknownDeep(a_ty) or try ip.isUnknownDeep(b_ty);
 
     if (has_unknown) {
         var set: std.array_hash_map.Auto(String, void) = .empty;
