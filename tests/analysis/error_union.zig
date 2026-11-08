@@ -24,7 +24,7 @@ const ErrorSet = error{A} || error{B};
 //    ^^^^^^^^ (type)(error{A,B})
 const ErrorSetWithUnknown = error{A} || undefined.Unknown;
 //    ^^^^^^^^^^^^^^^^^^^ (type)(error{A, ... })
-const ErrorSetWithUnknown2 = undefined.Unknown || error{A};
+const ErrorSetWithUnknown2 = undefined.Unknown || error{B};
 //    ^^^^^^^^^^^^^^^^^^^^ (type)(error{B, ... })
 const AllUnknown = undefined.Unknown || undefined.Unknown;
 //    ^^^^^^^^^^ (type)(error{ ... })
