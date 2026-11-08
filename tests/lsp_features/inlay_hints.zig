@@ -670,19 +670,14 @@ fn testInlayHints(source: []const u8, options: Options) !void {
             }
 
             const actual_label = switch (options.kind) {
-                .Parameter => blk: {
-                    if (!std.mem.endsWith(u8, hint.label.string, ":")) {
-                        try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri.raw, new_loc, .err, .{hint.label.string});
-                        continue :outer;
-                    }
-                    break :blk hint.label.string[0 .. hint.label.string.len - 1];
+                .Parameter => std.mem.cutSuffix(u8, hint.label.string, ":") orelse {
+                    try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri.raw, new_loc, .err, .{hint.label.string});
+                    continue :outer;
                 },
-                .Type => blk: {
-                    if (!std.mem.startsWith(u8, hint.label.string, ": ")) {
-                        try error_builder.msgAtLoc("label `{s}` must start with \": \"!", test_uri.raw, new_loc, .err, .{hint.label.string});
-                        continue :outer;
-                    }
-                    break :blk hint.label.string[2..hint.label.string.len];
+                .Type => std.mem.cutPrefix(u8, hint.label.string, ": ") orelse
+                    std.mem.cutSuffix(u8, hint.label.string, ": ") orelse {
+                    try error_builder.msgAtLoc("label `{s}` must start or end with \": \"!", test_uri.raw, new_loc, .err, .{hint.label.string});
+                    continue :outer;
                 },
                 _ => unreachable,
             };

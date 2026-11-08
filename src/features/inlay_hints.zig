@@ -245,6 +245,32 @@ const Builder = struct {
         });
     }
 
+    /// Append a hint in the form `hint: `, `: hint`
+    fn appendStringHint(
+        builder: *Builder,
+        name_token: Ast.TokenIndex,
+        hint: []const u8,
+        position: enum { prefix, suffix },
+    ) error{OutOfMemory}!void {
+        const name_loc = offsets.tokenToLoc(&builder.handle.tree, name_token);
+        const name = offsets.locToSlice(builder.handle.tree.source, name_loc);
+        if (std.mem.eql(u8, name, "_")) {
+            return;
+        }
+
+        const index, const label = switch (position) {
+            .prefix => .{ name_loc.start, try builder.arena.print("{s}: ", .{hint}) },
+            .suffix => .{ name_loc.end, try builder.arena.print(": {s}", .{hint}) },
+        };
+
+        try builder.hints.append(builder.arena, .{
+            .index = index,
+            .label = label,
+            .tooltip = null,
+            .kind = .Type,
+        });
+    }
+
     fn getInlayHints(self: *Builder, offset_encoding: offsets.Encoding) error{OutOfMemory}![]types.InlayHint {
         const source_indices = try self.arena.alloc(usize, self.hints.items.len);
         for (source_indices, self.hints.items) |*index, hint| {
@@ -395,24 +421,9 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!?[]co
     );
 }
 
-/// Append a hint in the form `: hint`
-fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hint: []const u8) error{OutOfMemory}!void {
-    const name = offsets.tokenToSlice(&builder.handle.tree, type_token_index);
-    if (std.mem.eql(u8, name, "_")) {
-        return;
-    }
-
-    try builder.hints.append(builder.arena, .{
-        .index = offsets.tokenToLoc(&builder.handle.tree, type_token_index).end,
-        .label = try builder.arena.print(": {s}", .{hint}),
-        .tooltip = null,
-        .kind = .Type,
-    });
-}
-
 fn inferAppendTypeStr(builder: *Builder, token: Ast.TokenIndex) Analyser.Error!void {
     const type_str = try typeStrOfToken(builder, token) orelse return;
-    try appendTypeHintString(builder, token, type_str);
+    try builder.appendStringHint(token, type_str, .suffix);
 }
 
 fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) Analyser.Error!void {
@@ -429,7 +440,11 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) Analyser.Err
         capture_token = name_token + 2;
 
         if (try typeStrOfToken(builder, name_token)) |type_str| {
-            try appendTypeHintString(builder, name_token, type_str);
+            try builder.appendStringHint(
+                name_token,
+                type_str,
+                .suffix,
+            );
         }
     }
 }
@@ -477,10 +492,10 @@ fn writeNodeInlayHint(
             const var_decl = builder.handle.tree.fullVarDecl(node).?;
             if (var_decl.ast.type_node != .none) return;
 
-            try appendTypeHintString(
-                builder,
+            try builder.appendStringHint(
                 var_decl.ast.mut_token + 1,
                 try typeStrOfNode(builder, node) orelse return,
+                .suffix,
             );
         },
         .assign_destructure => {
@@ -575,10 +590,10 @@ fn writeNodeInlayHint(
                 const ty = type_maybe orelse try decl.resolveType(builder.analyser) orelse continue;
                 const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = true });
                 if (type_str.len == 0) continue;
-                try appendTypeHintString(
-                    builder,
+                try builder.appendStringHint(
                     name_token,
                     type_str,
+                    .suffix,
                 );
             }
         },
