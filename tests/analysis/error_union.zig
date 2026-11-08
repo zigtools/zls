@@ -30,7 +30,7 @@ const ErrorSetWithUnknown2 = undefined.Unknown || error{B};
 //    ^^^^^^^^^^^^^^^^^^^^ (type)(error{B, ... })
 
 const ErrorSetWithUnknown3 = undefined.Unknown || error{A} || error{B};
-//    ^^^^^^^^^^ (type)(error{A,B, ... })
+//    ^^^^^^^^^^^^^^^^^^^^ (type)(error{A,B, ... })
 
 const AllUnknown = undefined.Unknown || undefined.Unknown;
 //    ^^^^^^^^^^ (type)(error{ ... })
