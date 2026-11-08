@@ -27,8 +27,8 @@
             .hash = "lsp_kit-0.1.0-bi_PL9o2DADHS1PDra3MGz1MXnsboN_ewNvrc419z7Fb",
         },
         .tracy = .{
-            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz",
-            .hash = "N-V-__8AAAZPdAGoNF3-tqKYHjTOa5QQ02rEWNvkDr-Vpl0C",
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.15.0.tar.gz",
+            .hash = "N-V-__8AABliiwINsxd0JlQwa91JejjvuOTL4S_Y6biDBTQG",
             .lazy = true,
         },
     },
