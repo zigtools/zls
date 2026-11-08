@@ -188,7 +188,7 @@ pub fn loadBuildConfiguration(
         },
     };
 
-    if (!term.success()) {
+    if (!term.eql(.{ .exited = 0 })) {
         const stderr_msg_prefix = if (stderr.bufferedLen() > 0) " with stderr:\n" else "";
         log.err("{s} in {qf} {f}{s}{s}\ncommand:\n{f}", .{ protocol_name, build_root, term, stderr_msg_prefix, stderr.buffered(), cmd });
         return error.AlreadyReported;
@@ -981,7 +981,7 @@ pub const BuildOnSave = struct {
             else => |e| return log.err("failed to await {s} in {qf}: {t}", .{ protocol_name, build_root, e }),
         };
 
-        if (term.success()) return;
+        if (term.eql(.{ .exited = 0 })) return;
 
         const stderr_msg_prefix = if (stderr.bufferedLen() > 0) " with stderr:\n" else "";
         log.err("{s} in {qf} {f}{s}{s}", .{ protocol_name, build_root, term, stderr_msg_prefix, stderr.buffered() });

@@ -10,7 +10,7 @@
     // nix flake update --commit-lock-file
     // ```
     // If you do not use Nix, a ZLS maintainer can take care of this.
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.18.0-dev.897+117fd40fb",
     // Must be kept in sync with the `deps.nix` for the Nix flake.
     // If you do not use Nix, a ZLS maintainer can take care of this.
     .dependencies = .{
@@ -27,8 +27,8 @@
             .hash = "lsp_kit-0.1.0-bi_PL9o2DADHS1PDra3MGz1MXnsboN_ewNvrc419z7Fb",
         },
         .tracy = .{
-            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.14.1.tar.gz",
-            .hash = "N-V-__8AAAZPdAGoNF3-tqKYHjTOa5QQ02rEWNvkDr-Vpl0C",
+            .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.15.0.tar.gz",
+            .hash = "N-V-__8AABliiwINsxd0JlQwa91JejjvuOTL4S_Y6biDBTQG",
             .lazy = true,
         },
     },

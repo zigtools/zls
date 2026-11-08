@@ -8,6 +8,7 @@ const std = @import("std");
 const Server = @import("../Server.zig");
 const lsp = @import("lsp");
 const types = lsp.types;
+const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const Uri = @import("../Uri.zig");
 const tracy = @import("tracy");
@@ -144,7 +145,14 @@ fn gotoDefinitionStructInit(
     if (token + 1 >= handle.tree.tokens.len) return null;
     if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
 
-    const resolved_type = try analyser.resolveStructInitType(handle, source_index) orelse return null;
+    const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
+    if (ancestors.len == 0) return null;
+    const resolved_type = try analyser.resolveDeclLiteralExpressionType(
+        handle,
+        ancestors[0],
+        ancestors[1..],
+    ) orelse return null;
+
     const token_handle = resolved_type.typeDefinitionToken() orelse return null;
     const target_range = offsets.tokenToRange(&token_handle.handle.tree, token_handle.token, offset_encoding);
     return .{
@@ -169,8 +177,24 @@ fn gotoDefinitionEnumLiteral(
         return gotoDefinitionStructInit(analyser, handle, source_index, kind, offset_encoding);
     };
     const name = offsets.locToSlice(handle.tree.source, name_loc);
-    const decl, _ = (try analyser.getSymbolEnumLiteral(handle, source_index, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.tokenToRange(&handle.tree, name_token, offset_encoding), decl, kind, offset_encoding);
+
+    const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
+    if (ancestors.len == 0) return null;
+
+    const decl, _ = try analyser.lookupSymbolFieldInit(
+        handle,
+        name,
+        ancestors[0],
+        ancestors[1..],
+    ) orelse return null;
+
+    return try gotoDefinitionSymbol(
+        analyser,
+        offsets.tokenToRange(&handle.tree, name_token, offset_encoding),
+        decl,
+        kind,
+        offset_encoding,
+    );
 }
 
 fn gotoDefinitionBuiltin(

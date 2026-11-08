@@ -40,8 +40,12 @@ The majority of LSP features are supported:
 - Inlay hints
 - Code actions
 
-## Quick Thanks :)
+## Contributing
 
-We'd like to take a second to thank all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) and donators/backers/sponsors; if you have time or money to spare, consider partaking in either of these options - they help keep ZLS awesome for everyone!
+Please see the [contributing guide](./CONTRIBUTING.md) if you're interested in joining all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) that keep ZLS alive and growing!
+
+## Sponsor
+
+You can support ZLS's development by donating through [Open Collective](https://opencollective.com/zigtools) (or [GitHub Sponsors](https://github.com/sponsors/zigtools)). Thank you too all our donators/backers/sponsors who help to keep ZLS awesome for everyone!
 
 [![OpenCollective Backers](https://opencollective.com/zigtools/backers.svg?width=890&limit=1000)](https://opencollective.com/zigtools#category-CONTRIBUTE)

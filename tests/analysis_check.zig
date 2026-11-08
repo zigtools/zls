@@ -188,14 +188,31 @@ pub fn main(init: std.process.Init) Error!void {
             test_item.expected_error == null;
 
         const ty = blk: {
-            const decl_maybe = switch (ctx) {
+            const decl_maybe: ?Analyser.DeclWithHandle = switch (ctx) {
                 .global => try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start),
                 .enum_literal => decl: {
-                    const decl, const type_maybe = try analyser.getSymbolEnumLiteral(handle, identifier_loc.start, identifier) orelse break :decl null;
+                    const ancestors = try zls.ast.nodesOverlappingIndex(analyser.arena, &handle.tree, identifier_loc.start);
+                    if (ancestors.len == 0) break :decl null;
+
+                    const decl, const type_maybe = try analyser.lookupSymbolFieldInit(
+                        handle,
+                        identifier,
+                        ancestors[0],
+                        ancestors[1..],
+                    ) orelse break :decl null;
+
                     if (type_maybe) |ty| break :blk ty;
                     break :decl decl;
                 },
-                .struct_init => break :blk try analyser.resolveStructInitType(handle, identifier_loc.start),
+                .struct_init => decl: {
+                    const ancestors = try zls.ast.nodesOverlappingIndex(analyser.arena, &handle.tree, identifier_loc.start);
+                    if (ancestors.len == 0) break :decl null;
+                    break :blk try analyser.resolveDeclLiteralExpressionType(
+                        handle,
+                        ancestors[0],
+                        ancestors[1..],
+                    ) orelse break :decl null;
+                },
             };
 
             const decl = decl_maybe orelse {

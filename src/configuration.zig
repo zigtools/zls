@@ -551,7 +551,7 @@ pub fn getZigEnv(
         allocator.free(zig_env_result.stderr);
     }
 
-    if (!zig_env_result.term.success()) {
+    if (!zig_env_result.term.eql(.{ .exited = 0 })) {
         log.err("zig env {f} and stderr:\n{s}", .{ zig_env_result.term, zig_env_result.stderr });
         return null;
     }
