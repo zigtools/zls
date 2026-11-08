@@ -8,6 +8,7 @@
 //! has syntax errors.
 
 const std = @import("std");
+const tracy = @import("tracy");
 const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
@@ -1612,6 +1613,9 @@ pub const Walker = struct {
 /// sorted from smallest to largest.
 /// caller owns the returned memory.
 pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: *const Ast, index: usize) error{OutOfMemory}![]Ast.Node.Index {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     std.debug.assert(index <= tree.source.len);
 
     var nodes: std.ArrayList(Ast.Node.Index) = .empty;
@@ -1640,6 +1644,9 @@ pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: *const Ast, ind
 /// caller owns the returned memory.
 /// this function can be removed when the parser has been improved.
 pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, tree: *const Ast, source_index: usize) error{OutOfMemory}![]Ast.Node.Index {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const NodeLoc = struct {
         node: Ast.Node.Index,
         loc: offsets.Loc,
@@ -1671,6 +1678,9 @@ pub fn nodesOverlappingIndexIncludingParseErrors(allocator: std.mem.Allocator, t
 /// returns a list of nodes that together encloses the given source code range
 /// caller owns the returned memory
 pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: *const Ast, loc: offsets.Loc) error{OutOfMemory}![]Ast.Node.Index {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     std.debug.assert(loc.start <= loc.end and loc.end <= tree.source.len);
 
     const Context = struct {

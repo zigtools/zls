@@ -6359,6 +6359,9 @@ pub fn lookupSymbolFieldInit(
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
 ) Error!?struct { DeclWithHandle, ?Type } {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const container_type = try analyser.resolveDeclLiteralExpressionType(
         handle,
         node,
@@ -6415,6 +6418,9 @@ pub fn resolveDeclLiteralExpressionType(
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
 ) Error!?Type {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var container_type = (try analyser.resolveExpressionType(
         handle,
         node,
