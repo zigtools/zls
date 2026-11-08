@@ -307,11 +307,17 @@ fn getSignatureInfo(
                 var ty = switch (tree.tokenTag(expr_first_token)) {
                     .period => blk: { // decl literal
                         loc.start += 1;
-                        const decl, const type_maybe = try analyser.getSymbolEnumLiteral(
+
+                        const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, loc.start);
+                        if (ancestors.len == 0) return null;
+
+                        const decl, const type_maybe = try analyser.lookupSymbolFieldInit(
                             handle,
-                            loc.start,
                             offsets.locToSlice(tree.source, loc),
+                            ancestors[0],
+                            ancestors[1..],
                         ) orelse continue;
+
                         break :blk type_maybe orelse try decl.resolveType(analyser) orelse continue;
                     },
                     else => try analyser.getFieldAccessType(handle, loc.start, loc) orelse continue,

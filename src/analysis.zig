@@ -6359,13 +6359,11 @@ pub fn lookupSymbolFieldInit(
     node: Ast.Node.Index,
     ancestors: []const Ast.Node.Index,
 ) Error!?struct { DeclWithHandle, ?Type } {
-    var container_type = (try analyser.resolveExpressionType(
+    const container_type = try analyser.resolveDeclLiteralExpressionType(
         handle,
         node,
         ancestors,
-    )) orelse return null;
-
-    if (container_type.is_type_val) return null;
+    ) orelse return null;
 
     const is_struct_init = switch (handle.tree.nodeTag(node)) {
         .struct_init_one,
@@ -6379,10 +6377,6 @@ pub fn lookupSymbolFieldInit(
         => true,
         else => false,
     };
-
-    container_type = try container_type.typeOf(analyser);
-    container_type = container_type.resolveDeclLiteralResultType();
-    container_type = try container_type.instanceUnchecked(analyser);
 
     if (is_struct_init) {
         const decl = try container_type.lookupSymbol(analyser, field_name) orelse return null;
@@ -6413,6 +6407,24 @@ pub fn lookupSymbolFieldInit(
     resolved_type = try resolved_type.instanceUnchecked(analyser);
     if (resolved_type.eql(container_type)) return .{ decl, null };
     return null;
+}
+
+pub fn resolveDeclLiteralExpressionType(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    node: Ast.Node.Index,
+    ancestors: []const Ast.Node.Index,
+) Error!?Type {
+    var container_type = (try analyser.resolveExpressionType(
+        handle,
+        node,
+        ancestors,
+    )) orelse return null;
+    if (container_type.is_type_val) return null;
+    container_type = try container_type.typeOf(analyser);
+    container_type = container_type.resolveDeclLiteralResultType();
+    container_type = try container_type.instanceUnchecked(analyser);
+    return container_type;
 }
 
 pub fn resolveExpressionType(
@@ -6857,43 +6869,6 @@ pub fn resolveExpressionTypeFromAncestors(
     }
 
     return null;
-}
-
-pub fn getSymbolEnumLiteral(
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    name: []const u8,
-) Error!?struct { DeclWithHandle, ?Type } {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const tree = &handle.tree;
-    const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
-    if (nodes.len == 0) return null;
-    return try analyser.lookupSymbolFieldInit(handle, name, nodes[0], nodes[1..]);
-}
-
-pub fn resolveStructInitType(
-    analyser: *Analyser,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-) Error!?Type {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const tree = &handle.tree;
-    const nodes = try ast.nodesOverlappingIndex(analyser.arena, tree, source_index);
-    if (nodes.len == 0) return null;
-    var ty = try analyser.resolveExpressionType(handle, nodes[0], nodes[1..]) orelse return null;
-    while (true) {
-        const unwrapped =
-            try analyser.resolveUnwrapErrorUnionType(ty, .payload) orelse
-            try analyser.resolveOptionalUnwrap(ty) orelse
-            break;
-        ty = unwrapped;
-    }
-    return ty;
 }
 
 /// Multiple when using branched types

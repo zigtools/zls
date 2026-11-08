@@ -237,17 +237,19 @@ const Builder = struct {
                 if (builder.local_only_decl) return;
                 var buffer: [2]Ast.Node.Index = undefined;
                 const struct_init = tree.fullStructInit(&buffer, node).?;
+
+                const container_type = try builder.analyser.resolveDeclLiteralExpressionType(
+                    handle,
+                    node,
+                    ancestors,
+                ) orelse return;
+
                 for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                     const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
                     const name = offsets.identifierTokenToNameSlice(tree, name_token);
                     if (!std.mem.eql(u8, name, builder.target_symbol_name)) continue;
 
-                    const candidate, _ = try builder.analyser.lookupSymbolFieldInit(
-                        handle,
-                        name,
-                        node,
-                        ancestors,
-                    ) orelse return;
+                    const candidate = try container_type.lookupSymbol(builder.analyser, name) orelse continue;
 
                     // if we get here then we know that the name of the field matched
                     // and duplicate fields are invalid so just return early
@@ -804,7 +806,15 @@ fn referencesHandler(
             },
             .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
             .enum_literal => blk: {
-                const decl, _ = try analyser.getSymbolEnumLiteral(handle, source_index, name) orelse break :blk null;
+                const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
+                if (ancestors.len == 0) return null;
+
+                const decl, _ = try analyser.lookupSymbolFieldInit(
+                    handle,
+                    name,
+                    ancestors[0],
+                    ancestors[1..],
+                ) orelse break :blk null;
                 break :blk decl;
             },
             .keyword => null,

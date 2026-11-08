@@ -582,12 +582,25 @@ fn writeNodeInlayHint(
             if (!builder.config.inlay_hints_show_struct_literal_field_type) return;
             var buffer: [2]Ast.Node.Index = undefined;
             const struct_init = tree.fullStructInit(&buffer, node).?;
+            if (struct_init.ast.fields.len == 0) return;
+
+            const source_index = builder.handle.tree.tokenStart(struct_init.ast.lbrace) + 1;
+            const ancestors = try ast.nodesOverlappingIndex(builder.analyser.arena, &builder.handle.tree, source_index);
+            if (ancestors.len == 0) return;
+
+            const container_type = try builder.analyser.resolveDeclLiteralExpressionType(
+                builder.handle,
+                ancestors[0],
+                ancestors[1..],
+            ) orelse return;
+
             for (struct_init.ast.fields) |value_node| { // the node of `value` in `.name = value`
                 const name_token = tree.firstToken(value_node) - 2; // math our way two token indexes back to get the `name`
-                const name_loc = offsets.tokenToLoc(tree, name_token);
-                const name = offsets.locToSlice(tree.source, name_loc);
-                const decl, const type_maybe = (try builder.analyser.getSymbolEnumLiteral(builder.handle, name_loc.start, name)) orelse continue;
-                const ty = type_maybe orelse try decl.resolveType(builder.analyser) orelse continue;
+                const name = offsets.tokenToSlice(tree, name_token);
+
+                const decl = try container_type.lookupSymbol(builder.analyser, name) orelse continue;
+                const ty = try decl.resolveType(builder.analyser) orelse continue;
+
                 const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = true });
                 if (type_str.len == 0) continue;
                 try builder.appendStringHint(
