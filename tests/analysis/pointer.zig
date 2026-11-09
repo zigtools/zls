@@ -270,6 +270,18 @@ const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const bitpack struct 
 //                                 ^ (bitpack struct {})()
 //                                               ^^^^^^^^ (AddressSpace)()
 
+const VolatilePointer = *volatile u32;
+//    ^^^^^^^^^^^^^^^ (type)(*volatile u32)
+
+const AlignConstVolatilePointer = *align(8) const volatile u32;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^ (type)(*align(8) const volatile u32)
+
+const AllowZeroConstPointer = *allowzero const u32;
+//    ^^^^^^^^^^^^^^^^^^^^^ (type)(*allowzero const u32)
+
+const AddrspacePointer = *addrspace(.uniform) u32;
+//    ^^^^^^^^^^^^^^^^ (type)(*u32)
+
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
 var runtime_i8: i8 = -1;
