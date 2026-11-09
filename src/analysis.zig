@@ -3918,29 +3918,39 @@ pub const Type = struct {
         var deduplicator: Deduplicator = .empty;
         defer deduplicator.deinit(arena);
 
-        const has_type_val = for (entries) |entry| {
-            if (entry.type.data == .compile_error) {
-                continue;
-            }
-            break entry.type.is_type_val;
-        } else entries[0].type.is_type_val;
+        var has_type_val: bool = false;
+        var has_useful_type: bool = false;
+        for (entries) |entry| {
+            if (entry.type.data == .compile_error) continue;
+            if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .noreturn_type) continue;
+            if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .undefined_type) continue;
+
+            has_useful_type = true;
+            if (entry.type.is_type_val) has_type_val = true;
+        }
 
         for (entries) |entry| {
+            if (has_useful_type) {
+                if (entry.type.data == .compile_error) continue;
+                if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .noreturn_type) continue;
+                if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .undefined_type) continue;
+            }
             try deduplicator.put(
                 arena,
                 .{ .type_data = entry.type.data, .descriptor = entry.descriptor },
                 {},
             );
-            if (entry.type.data == .compile_error) {
-                continue;
-            }
             if (entry.type.is_type_val != has_type_val) {
                 return null;
             }
         }
 
-        if (deduplicator.count() == 1)
-            return entries[0].type;
+        if (deduplicator.count() == 0) unreachable;
+
+        if (deduplicator.count() == 1) return .{
+            .data = deduplicator.keys()[0].type_data,
+            .is_type_val = has_type_val,
+        };
 
         return .{
             .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },
