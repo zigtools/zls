@@ -108,7 +108,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
     try builder.completions.ensureUnusedCapacity(builder.arena, 2);
 
     switch (ty.data) {
-        .pointer => |info| switch (info.size) {
+        .pointer => |info| switch (info.flags.size) {
             .one, .c => {
                 if (ty.is_type_val) return;
 
@@ -118,7 +118,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
                     .detail = try info.elem_ty.stringifyTypeVal(builder.analyser, .{ .truncate_container_decls = false }),
                 });
 
-                if (info.size == .c) {
+                if (info.flags.size == .c) {
                     builder.completions.appendAssumeCapacity(.{
                         .label = "?",
                         .kind = .Operator,
@@ -142,7 +142,7 @@ fn typeToCompletion(builder: *Builder, ty: Analyser.Type) Analyser.Error!void {
 
                 var many_ptr_ty = ty;
                 many_ptr_ty.is_type_val = true;
-                many_ptr_ty.data.pointer.size = .many;
+                many_ptr_ty.data.pointer.flags.size = .many;
                 builder.completions.appendAssumeCapacity(.{
                     .label = "ptr",
                     .kind = .Field,
