@@ -23,14 +23,23 @@ const ErrorUnionUnknownPayload = Error!Unknown;
 const ErrorSet = error{A} || error{B};
 //    ^^^^^^^^ (type)(error{A,B})
 
-const ErrorSetWithUnknown = error{A} || undefined.Unknown;
+const ErrorSetWithUnknown = error{A} || Unknown;
 //    ^^^^^^^^^^^^^^^^^^^ (type)(error{A, ... })
 
-const ErrorSetWithUnknown2 = undefined.Unknown || error{B};
+const ErrorSetWithUnknown2 = Unknown || error{B};
 //    ^^^^^^^^^^^^^^^^^^^^ (type)(error{B, ... })
 
-const ErrorSetWithUnknown3 = undefined.Unknown || error{A} || error{B};
+const ErrorSetWithUnknown3 = Unknown || error{A} || error{B};
 //    ^^^^^^^^^^^^^^^^^^^^ (type)(error{A,B, ... })
 
-const AllUnknown = undefined.Unknown || undefined.Unknown;
+const AllUnknown = Unknown || Unknown;
 //    ^^^^^^^^^^ (type)(error{ ... })
+
+const AnyerrorUnknown = anyerror || Unknown;
+//    ^^^^^^^^^^^^^^^ (type)(anyerror)
+
+const UnknownAnyerror = Unknown || anyerror;
+//    ^^^^^^^^^^^^^^^ (type)(anyerror)
+
+const AnyerrorPartiallyUnknown = anyerror || error{A} || Unknown;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (type)(anyerror)

@@ -110,7 +110,7 @@ pub const Key = union(enum) {
     pub const ErrorSet = struct {
         owner_decl: Decl.OptionalIndex,
         names: StringSlice,
-        has_unknown: Index = .bool_type,
+        has_unknown: Index = .bool_false,
     };
 
     pub const Function = struct {
@@ -3553,6 +3553,11 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
 pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
     const has_unknown = try ip.isUnknownDeep(a_ty) or try ip.isUnknownDeep(b_ty);
 
+    // Anything merged with anyerror is anyerror.
+    if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
+        return .anyerror_type;
+    }
+
     if (has_unknown) {
         var set: std.array_hash_map.Auto(String, void) = .empty;
         defer set.deinit(ip.gpa);
@@ -3584,11 +3589,6 @@ pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!
     } else {
         assert(ip.zigTypeTag(a_ty) == .error_set);
         assert(ip.zigTypeTag(b_ty) == .error_set);
-
-        // Anything merged with anyerror is anyerror.
-        if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
-            return .anyerror_type;
-        }
 
         if (a_ty == b_ty) return a_ty;
 
