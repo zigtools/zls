@@ -640,7 +640,7 @@ pub const UnresolvedConfig = blk: {
 
 /// A packed struct where every field name is copied from `Config` but the field type is `bool`.
 pub const DidConfigChange = @Struct(
-    .@"packed",
+    .@"bitpack",
     null,
     @typeInfo(Config).@"struct".field_names,
     &@splat(bool),
