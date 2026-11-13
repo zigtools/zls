@@ -814,29 +814,18 @@ fn resolveGenericTypeInternal(
     return resolved;
 }
 
-fn findReturnStatementInternal(tree: *const Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
+fn findReturnStatement(tree: *const Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
     var buffer: [2]Ast.Node.Index = undefined;
     const statements = tree.blockStatements(&buffer, body) orelse return null;
 
     for (statements) |child_idx| {
-        if (tree.nodeTag(child_idx) == .@"return") {
-            if (already_found.*) return null;
-            already_found.* = true;
-            result = child_idx;
-            continue;
-        }
-
-        result = findReturnStatementInternal(tree, child_idx, already_found);
+        if (tree.nodeTag(child_idx) != .@"return") continue;
+        result = child_idx;
     }
 
     return result;
-}
-
-fn findReturnStatement(tree: *const Ast, body: Ast.Node.Index) ?Ast.Node.Index {
-    var already_found = false;
-    return findReturnStatementInternal(tree, body, &already_found);
 }
 
 /// if `func_type_param` is callable, returns an instance of the return type.
