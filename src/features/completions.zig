@@ -1190,12 +1190,12 @@ fn getEnumLiteralContext(
         (dot_token_index - 2)
     else
         (dot_token_index - 1);
-    if (token_index == 0) return null;
 
     var dot_context: EnumLiteralContext = .{ .likely = .enum_literal };
 
     tag: switch (tree.tokenTag(token_index)) {
         .equal => {
+            if (token_index == 0) return null;
             token_index -= 1;
             dot_context.need_ret_type = tree.tokenTag(token_index) == .r_paren;
             dot_context.likely = .enum_assignment;
@@ -1234,6 +1234,7 @@ fn getEnumLiteralContext(
             }
         },
         .equal_equal, .bang_equal => {
+            if (token_index == 0) return null;
             token_index -= 1;
             dot_context.likely = .enum_comparison;
             dot_context.type_info = .{ .identifier_token_index = token_index };
@@ -1242,6 +1243,7 @@ fn getEnumLiteralContext(
             dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return null;
         },
         .ampersand => {
+            if (token_index == 0) return null;
             token_index -= 1;
             continue :tag tree.tokenTag(token_index);
         },

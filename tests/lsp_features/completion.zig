@@ -3770,6 +3770,9 @@ test "integer overflow in dot completions at beginning of file" {
     try testCompletion(
         \\.<cursor>
     , &.{});
+    try testCompletion(
+        \\=&.<cursor>
+    , &.{});
 }
 
 test "enum completion on out of bound parameter index" {
