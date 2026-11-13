@@ -816,8 +816,8 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     const dot_token_index = offsets.sourceIndexToTokenIndex(tree, loc.start).pickPreferred(&.{.period}, tree) orelse return;
     if (dot_token_index < 2) return;
 
-    const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
-    const dot_context = getEnumLiteralContext(tree, dot_token_index, nodes) orelse return;
+    const ancestors = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
+    const dot_context = getEnumLiteralContext(tree, dot_token_index, ancestors) orelse return;
     const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
     const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
     for (containers) |container| {
@@ -835,8 +835,8 @@ fn completeError(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     if (err_token_index < 2) return;
     const dot_token_index = err_token_index + 1;
 
-    const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
-    const dot_context = getSwitchOrStructInitContext(tree, dot_token_index, nodes) orelse return;
+    const ancestors = try ast.nodesOverlappingIndexIncludingParseErrors(builder.arena, tree, loc.start);
+    const dot_context = getSwitchOrStructInitContext(tree, dot_token_index, ancestors) orelse return;
     const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
     const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
     for (containers) |container| {
@@ -1674,12 +1674,12 @@ fn collectContainerNodes(
         },
     };
     const source_index = offsets.tokenToLoc(&handle.tree, token_index).end;
-    const nodes = try ast.nodesOverlappingIndexIncludingParseErrors(gpa, &handle.tree, source_index);
-    defer gpa.free(nodes);
+    const ancestors = try ast.nodesOverlappingIndexIncludingParseErrors(gpa, &handle.tree, source_index);
+    defer gpa.free(ancestors);
 
-    switch (handle.tree.nodeTag(nodes[0])) {
+    switch (handle.tree.nodeTag(ancestors[0])) {
         .field_access, .enum_literal => {
-            if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
+            if (try builder.analyser.resolveTypeOfNode(.of(ancestors[0], handle))) |ty| {
                 try collectFieldAccessTypes(builder, dot_context, ty, &types_with_handles);
                 return types_with_handles.keys();
             }
@@ -1687,16 +1687,16 @@ fn collectContainerNodes(
         else => {},
     }
 
-    if (nodes.len > 1) {
-        switch (handle.tree.nodeTag(nodes[1])) {
+    if (ancestors.len > 1) {
+        switch (handle.tree.nodeTag(ancestors[1])) {
             .global_var_decl,
             .local_var_decl,
             .simple_var_decl,
             .aligned_var_decl,
             => {
-                const var_decl = handle.tree.fullVarDecl(nodes[1]).?;
-                if (nodes[0].toOptional() == var_decl.ast.type_node) {
-                    if (try builder.analyser.resolveTypeOfNode(.of(nodes[0], handle))) |ty| {
+                const var_decl = handle.tree.fullVarDecl(ancestors[1]).?;
+                if (ancestors[0].toOptional() == var_decl.ast.type_node) {
+                    if (try builder.analyser.resolveTypeOfNode(.of(ancestors[0], handle))) |ty| {
                         _ = try ty.getAllTypesWithHandlesArraySet(builder.analyser, &types_with_handles);
                         return types_with_handles.keys();
                     }
@@ -1710,7 +1710,7 @@ fn collectContainerNodes(
     switch (position_context) {
         .var_access => |loc| try collectVarAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .field_access => |loc| try collectFieldAccessContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
-        .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, nodes, &types_with_handles),
+        .enum_literal => |loc| try collectEnumLiteralContainerNodes(builder, handle, loc, ancestors, &types_with_handles),
         .builtin => |loc| try collectBuiltinContainerNodes(builder, handle, loc, dot_context, &types_with_handles),
         .keyword => |token| try collectKeywordFnContainerNodes(builder, token, dot_context, &types_with_handles),
         else => {},

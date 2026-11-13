@@ -188,7 +188,6 @@ pub fn main(init: std.process.Init) Error!void {
                 .global => try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start),
                 .enum_literal => decl: {
                     const ancestors = try zls.ast.nodesOverlappingIndex(analyser.arena, &handle.tree, identifier_loc.start);
-                    if (ancestors.len == 0) break :decl null;
 
                     const decl, const type_maybe = try analyser.lookupSymbolFieldInit(
                         handle,
@@ -202,7 +201,6 @@ pub fn main(init: std.process.Init) Error!void {
                 },
                 .struct_init => decl: {
                     const ancestors = try zls.ast.nodesOverlappingIndex(analyser.arena, &handle.tree, identifier_loc.start);
-                    if (ancestors.len == 0) break :decl null;
                     break :blk try analyser.resolveDeclLiteralExpressionType(
                         handle,
                         ancestors[0],

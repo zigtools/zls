@@ -328,7 +328,6 @@ fn hoverDefinitionStructInit(
     if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
 
     const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
-    if (ancestors.len == 0) return null;
     const resolved_type = try analyser.resolveDeclLiteralExpressionType(
         handle,
         ancestors[0],
@@ -382,7 +381,6 @@ fn hoverDefinitionEnumLiteral(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
 
     const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
-    if (ancestors.len == 0) return null;
 
     const decl, const type_maybe = try analyser.lookupSymbolFieldInit(
         handle,

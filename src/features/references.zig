@@ -480,8 +480,8 @@ fn controlFlowReferences(
         .keyword_continue,
         .keyword_break,
         => {
-            const nodes = try ast.nodesOverlappingIndex(allocator, tree, handle.tree.tokenStart(kw_token));
-            defer allocator.free(nodes);
+            const ancestors = try ast.nodesOverlappingIndex(allocator, tree, handle.tree.tokenStart(kw_token));
+            defer allocator.free(ancestors);
 
             const maybe_label = blk: {
                 if (kw_token + 2 >= tree.tokens.len) break :blk null;
@@ -489,7 +489,7 @@ fn controlFlowReferences(
                 if (tree.tokenTag(kw_token + 2) != .identifier) break :blk null;
                 break :blk offsets.identifierTokenToNameSlice(tree, kw_token + 2);
             };
-            for (nodes) |node| switch (tree.nodeTag(node)) {
+            for (ancestors) |node| switch (tree.nodeTag(node)) {
                 .for_simple,
                 .@"for",
                 .while_cont,
@@ -538,10 +538,10 @@ fn controlFlowReferences(
 
             if (tag == .keyword_switch and maybe_label == null) return .empty;
 
-            const nodes = try ast.nodesOverlappingIndex(allocator, tree, tree.tokenStart(kw_token));
-            defer allocator.free(nodes);
+            const ancestors = try ast.nodesOverlappingIndex(allocator, tree, tree.tokenStart(kw_token));
+            defer allocator.free(ancestors);
 
-            var walker: ast.Walker = try .init(allocator, tree, nodes[0]);
+            var walker: ast.Walker = try .init(allocator, tree, ancestors[0]);
             defer walker.deinit(allocator);
 
             _ = try walker.nextIgnoreClose(allocator, tree);
@@ -807,7 +807,6 @@ fn referencesHandler(
             .label_access, .label_decl => try Analyser.lookupLabel(handle, name, source_index),
             .enum_literal => blk: {
                 const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
-                if (ancestors.len == 0) return null;
 
                 const decl, _ = try analyser.lookupSymbolFieldInit(
                     handle,

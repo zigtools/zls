@@ -586,7 +586,6 @@ fn writeNodeInlayHint(
 
             const source_index = builder.handle.tree.tokenStart(struct_init.ast.lbrace) + 1;
             const ancestors = try ast.nodesOverlappingIndex(builder.analyser.arena, &builder.handle.tree, source_index);
-            if (ancestors.len == 0) return;
 
             const container_type = try builder.analyser.resolveDeclLiteralExpressionType(
                 builder.handle,

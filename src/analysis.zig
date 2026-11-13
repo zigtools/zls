@@ -2862,11 +2862,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
         .enum_literal => {
             const source_token = tree.tokenStart(tree.nodeMainToken(node));
-            const lineage = try ast.nodesOverlappingIndex(analyser.arena, tree, source_token);
-            defer analyser.arena.free(lineage);
+            const ancestors = try ast.nodesOverlappingIndex(analyser.arena, tree, source_token);
+            defer analyser.arena.free(ancestors);
 
             const tag = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(node));
-            const decl, const type_maybe = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
+            const decl, const type_maybe = (try analyser.lookupSymbolFieldInit(handle, tag, node, ancestors[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
             return type_maybe orelse decl.resolveType(analyser);
         },
 
