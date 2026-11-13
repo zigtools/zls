@@ -46,7 +46,7 @@ pub const TokenType = enum(u32) {
     keywordLiteral,
 };
 
-pub const TokenModifiers = packed struct(u16) {
+pub const TokenModifiers = bitpack struct(u16) {
     declaration: bool = false,
     definition: bool = false,
     readonly: bool = false,

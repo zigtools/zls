@@ -1089,12 +1089,12 @@ test "struct" {
         .{ "struct", .keyword, .{} },
     });
     try testSemanticTokens(
-        \\const Foo = packed struct(u32) {};
+        \\const Foo = bitpack struct(u32) {};
     , &.{
         .{ "const", .keyword, .{} },
         .{ "Foo", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "packed", .keyword, .{} },
+        .{ "bitpack", .keyword, .{} },
         .{ "struct", .keyword, .{} },
         .{ "u32", .type, .{} },
     });
@@ -1190,12 +1190,12 @@ test "union" {
         .{ "union", .keyword, .{} },
     });
     try testSemanticTokens(
-        \\const Foo = packed union(enum) {};
+        \\const Foo = bitpack union(enum) {};
     , &.{
         .{ "const", .keyword, .{} },
         .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "packed", .keyword, .{} },
+        .{ "bitpack", .keyword, .{} },
         .{ "union", .keyword, .{} },
         .{ "enum", .keyword, .{} },
     });

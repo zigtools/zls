@@ -288,12 +288,12 @@ test "container decl" {
         .{ .startLine = 0, .startCharacter = 20, .endLine = 3, .endCharacter = 24 },
     });
     try testFoldingRange(
-        \\const Foo = packed struct(u32) {
+        \\const Foo = bitpack struct(u32) {
         \\    alpha: u16,
         \\    beta: u16,
         \\};
     , &.{
-        .{ .startLine = 0, .startCharacter = 32, .endLine = 2, .endCharacter = 14 },
+        .{ .startLine = 0, .startCharacter = 33, .endLine = 2, .endCharacter = 14 },
     });
     try testFoldingRange(
         \\const Foo = union {

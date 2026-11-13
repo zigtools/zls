@@ -74,7 +74,7 @@ pub const Key = union(enum) {
         flags: Flags,
         packed_offset: PackedOffset = .{ .bit_offset = 0, .host_size = 0 },
 
-        pub const Flags = packed struct(u32) {
+        pub const Flags = bitpack struct(u32) {
             size: std.lang.Type.Pointer.Size,
             is_const: bool = false,
             is_volatile: bool = false,
@@ -84,7 +84,7 @@ pub const Key = union(enum) {
             alignment: u16 = 0,
         };
 
-        pub const PackedOffset = packed struct(u32) {
+        pub const PackedOffset = bitpack struct(u32) {
             bit_offset: u16,
             host_size: u16,
         };
@@ -123,7 +123,7 @@ pub const Key = union(enum) {
         return_type: Index,
         flags: Flags = .{},
 
-        pub const Flags = packed struct(u32) {
+        pub const Flags = bitpack struct(u32) {
             calling_convention: std.lang.CallingConvention.Tag = .auto,
             is_generic: bool = false,
             is_var_args: bool = false,
@@ -197,7 +197,7 @@ pub const Key = union(enum) {
         }
     };
 
-    const F64Value = packed struct {
+    const F64Value = bitpack struct {
         a: u32,
         b: u32,
 
@@ -210,7 +210,7 @@ pub const Key = union(enum) {
         }
     };
 
-    const F80Value = packed struct {
+    const F80Value = bitpack struct {
         a: u32,
         b: u32,
         c: u32,
@@ -226,7 +226,7 @@ pub const Key = union(enum) {
         }
     };
 
-    const F128Value = packed struct {
+    const F128Value = bitpack struct {
         a: u32,
         b: u32,
         c: u32,
@@ -3307,7 +3307,7 @@ pub fn isUnsignedInt(ip: *InternPool, ty: Index, target: std.Target) bool {
     };
 }
 
-/// Asserts the type is an integer, enum, error set, packed struct, or vector of one of them.
+/// Asserts the type is an integer, enum, error set, bitpack struct, or vector of one of them.
 pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.lang.Type.Int {
     var index = ty;
     while (true) switch (index) {
@@ -3349,7 +3349,7 @@ pub fn intInfo(ip: *InternPool, ty: Index, target: std.Target) std.lang.Type.Int
             },
             .struct_type => |struct_index| {
                 const struct_info = ip.getStruct(struct_index);
-                assert(struct_info.layout == .@"packed");
+                assert(struct_info.layout == .@"bitpack");
                 index = struct_info.backing_int_ty;
             },
             // TODO revisit this when error sets support custom int types (comment taken from zig codebase)

@@ -3,9 +3,9 @@ const ArrayType = [3]u8;
 const ArrayTypeWithSentinel = [3:0]u8;
 //    ^^^^^^^^^^^^^^^^^^^^^ (type)([3:0]u8)
 
-const ArrayTypeWithSentinel2 = [3:.{}]packed struct {};
-//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3:?]packed struct {})
-//                                ^ (packed struct {})()
+const ArrayTypeWithSentinel2 = [3:.{}]bitpack struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3:?]bitpack struct {})
+//                                ^ (bitpack struct {})()
 
 const InvalidArrayTypeAccess0 = ArrayType[0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
