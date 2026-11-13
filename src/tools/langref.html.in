@@ -755,12 +755,21 @@
         </tr>
         <tr>
             <th scope="row"><code>\u{NNNNNN}</code></th>
-          <td>hexadecimal Unicode scalar value UTF-8 encoded (1 or more digits)</td>
+          <td>hexadecimal Unicode code point (1 or more digits)</td>
         </tr>
         </tbody>
       </table>
       </div>
-      <p>Note that the maximum valid Unicode scalar value is {#syntax#}0x10ffff{#endsyntax#}.</p>
+      <p>
+      Note that the highest Unicode code point is {#syntax#}0x10ffff{#endsyntax#}. Character
+      literals are integers ({#syntax#}'A'{#endsyntax#} = {#syntax#}65{#endsyntax#} and 
+      {#syntax#}'\u{10000}'{#endsyntax#} = {#syntax#}0x10000{#endsyntax#} = {#syntax#}65536{#endsyntax#}),
+      and <code>\u</code> escapes in string literals are encoded as UTF-8
+      ({#syntax#}"A"{#endsyntax#} = {#syntax#}"\u{41}"{#endsyntax#} = {#syntax#}"\x41"{#endsyntax#}
+      and {#syntax#}"\u{10000}"{#endsyntax#} = {#syntax#}"\xF0\x90\x80\x80"{#endsyntax#}).
+      <code>\u</code> escapes can be used for surrogate code points, which are not Unicode
+      scalar values or technically allowed in UTF-8 as defined by the Unicode standard, but can be useful in practice.
+      </p>
       {#header_close#}
       {#header_open|Multiline String Literals#}
       <p>
@@ -1681,7 +1690,7 @@ try value == 5678{#endsyntax#}</pre>
               <li>{#link|Floats#}</li>
               <li>{#link|bool|Primitive Types#}</li>
               <li>{#link|type|Primitive Types#}</li>
-              <li>{#link|packed struct#}</li>
+              <li>{#link|bitpack struct#}</li>
             </ul>
           </td>
           <td>
@@ -1885,20 +1894,77 @@ const B = error{Two};
       </div>
       {#header_close#}
       {#header_open|Precedence#}
+      <p>
+      Zig features partial operator precedence: not every operator has a defined precedence with
+      every other operator. Mixing operators with ambiguous precedence is prohibited and parentheses
+      are mandatory. Consequently, valid code is typically auto-descriptive; when reading and
+      writing Zig code, there are very few precedence rules you'll need to remember.
+      </p>
+
+      {#code|operator_precedence.zig#}
+
+      {#code|ambiguous_precedence_orelse.zig#}
+
+      <p>
+      There is a set of operators (prefix operators, suffix operators, etc) that have unambiguously
+      higher precedence than all other operators. That set of operators has the following precedence table:
+      </p>
+
       <pre>{#syntax#}x() x[] x.y x.* x.?
 a!b
 x{}
 !x -x -%x ~x &x ?x try
-* / % *% *| ||
-+ - ++ +% -% +| -|
-<< >> <<|
-& ^ | orelse catch
+// lower precedence operators omitted{#endsyntax#}</pre>
+
+      <p>
+      For the other operators, simplified operator precedence tables are provided below, each containing only
+      the information that you'll need to know when reading/writing code that uses that particular category of operators.
+      The operators that have ambiguous precedence or semantic errors with the relevant operators have been omitted,
+      as have the operators with higher precedence (those shown above).
+      </p>
+
+      <p>
+      For arithmetic operators:
+      </p>
+
+      <pre>{#syntax#}* / *% *| %
++ - +% -% +| -|
 == != < > <= >=
-and
-or
-= *= *%= *|= /= %= += +%= +|= -= -%= -|= <<= <<|= >>= &= ^= |={#endsyntax#}</pre>
+and or{#endsyntax#}</pre>
+
+      <p>
+      For bitwise operators:
+      </p>
+
+      <pre>{#syntax#}<< <<| >> & ^ |
+== != < > <= >=
+and or{#endsyntax#}</pre>
+
+      <p>
+      For null and error recovery operators:
+      </p>
+
+      <pre>{#syntax#}catch orelse{#endsyntax#}</pre>
+
+      <p>
+      For error set operators:
+      </p>
+
+      <pre>{#syntax#}||{#endsyntax#}</pre>
+
+      <p>
+      For array concatenation operators:
+      </p>
+
+      <pre>{#syntax#}++{#endsyntax#}</pre>
+
+      <p>
+      The full precedence rules can be found in the {#link|Grammar#}, which also includes an {#link|Operator Precedence Flowchart#}.
+      </p>
+
       {#header_close#}
       {#header_close#}
+
       {#header_open|Arrays#}
       {#code|test_arrays.zig#}
 
@@ -2261,20 +2327,20 @@ or
       the C ABI for the target.</p>
       <p>If well-defined in-memory layout is not required, {#link|struct#} is a better choice
       because it places fewer restrictions on the compiler.</p>
-      <p>See {#link|packed struct#} for a struct that has the ABI of its backing integer,
+      <p>See {#link|bitpack struct#} for a struct that has the ABI of its backing integer,
       which can be useful for modeling flags.</p>
       {#see_also|extern union|extern enum#}
       {#header_close#}
 
-      {#header_open|packed struct#}
+      {#header_open|bitpack struct#}
       <p>
-      {#syntax#}packed{#endsyntax#} structs, like {#syntax#}enum{#endsyntax#}, are based on the concept
-      of interpreting integers differently. All packed structs have a <strong>backing integer</strong>,
+      {#syntax#}bitpack{#endsyntax#} structs, like {#syntax#}enum{#endsyntax#}, are based on the concept
+      of interpreting integers differently. All bitpack structs have a <strong>backing integer</strong>,
       which is implicitly determined by the total bit count of fields, or explicitly specified.
-      Packed structs have well-defined memory layout - exactly the same ABI as their backing integer.
+      Bitpack structs have well-defined memory layout - exactly the same ABI as their backing integer.
       </p>
       <p>
-      Each field of a packed struct is interpreted as a logical sequence of bits, arranged from
+      Each field of a bitpack struct is interpreted as a logical sequence of bits, arranged from
       least to most significant. Allowed field types:
       </p>
       <ul>
@@ -2283,16 +2349,16 @@ or
         the backing integer.</li>
         <li>A {#link|bool|Primitive Types#} field uses exactly 1 bit.</li>
         <li>An {#link|enum#} field uses exactly the bit width of its integer tag type.</li>
-        <li>A {#link|packed union#} field uses exactly the bit width of the union field with
+        <li>A {#link|bitpack union#} field uses exactly the bit width of the union field with
         the largest bit width.</li>
-        <li>A {#syntax#}packed struct{#endsyntax#} field uses the bits of its backing integer.</li>
+        <li>A {#syntax#}bitpack struct{#endsyntax#} field uses the bits of its backing integer.</li>
       </ul>
       <p>
-      This means that a {#syntax#}packed struct{#endsyntax#} can participate
+      This means that a {#syntax#}bitpack struct{#endsyntax#} can participate
       in a {#link|@bitCast#} or a {#link|@ptrCast#} to reinterpret memory.
       This even works at {#link|comptime#}:
       </p>
-      {#code|test_packed_structs.zig#}
+      {#code|test_bitpack_structs.zig#}
 
       <p>
       The backing integer can be inferred or explicitly provided. When
@@ -2300,13 +2366,13 @@ or
       will be enforced at compile time to exactly match the total bit width of
       the fields:
       </p>
-      {#code|test_missized_packed_struct.zig#}
+      {#code|test_missized_bitpack_struct.zig#}
 
       <p>
-      A {#syntax#}packed struct{#endsyntax#} can be converted to and from its backing
+      A {#syntax#}bitpack struct{#endsyntax#} can be converted to and from its backing
       integer using {#link|@backingInt#} and {#link|@fromBackingInt#}:
       </p>
-      {#code|test_packed_struct_backing_int.zig#}
+      {#code|test_bitpack_struct_backing_int.zig#}
 
       <p>
       Zig allows the address to be taken of a non-byte-aligned field:
@@ -2326,7 +2392,7 @@ or
       <p>
       Pointers to non-ABI-aligned fields share the same address as the other fields within their host integer:
       </p>
-      {#code|test_packed_struct_field_address.zig#}
+      {#code|test_bitpack_struct_field_address.zig#}
 
       <p>
       This can be observed with {#link|@bitOffsetOf#} and {#link|offsetOf#}:
@@ -2334,10 +2400,10 @@ or
       {#code|test_bitOffsetOf_offsetOf.zig#}
 
       <p>
-      Packed structs have the same alignment as their backing integer, however, overaligned
-      pointers to packed structs can override this:
+      Bitpack structs have the same alignment as their backing integer, however, overaligned
+      pointers to bitpack structs can override this:
       </p>
-      {#code|test_overaligned_packed_struct.zig#}
+      {#code|test_overaligned_bitpack_struct.zig#}
 
       <p>
       It's also possible to set alignment of struct fields:
@@ -2345,10 +2411,10 @@ or
       {#code|test_aligned_struct_fields.zig#}
 
       <p>
-      Equating packed structs results in a comparison of the backing integer,
+      Equating bitpack structs results in a comparison of the backing integer,
       and only works for the {#syntax#}=={#endsyntax#} and {#syntax#}!={#endsyntax#} {#link|Operators#}.
       </p>
-      {#code|test_packed_struct_equality.zig#}
+      {#code|test_bitpack_struct_equality.zig#}
 
       <p>
       Field access and assignment can be understood as shorthand for bitshifts
@@ -2357,7 +2423,7 @@ or
       input-output (MMIO). Instead of field access on {#link|volatile#} {#link|Pointers#},
       construct a fully-formed new value first, then write that value to the volatile pointer.
       </p>
-      {#code|packed_struct_mmio.zig#}
+      {#code|bitpack_struct_mmio.zig#}
       {#header_close#}
 
       {#header_open|Struct Naming#}
@@ -2477,7 +2543,7 @@ or
       can be as a list of fields. Only one field can be active at a time.
       The in-memory representation of bare unions is not guaranteed.
       Bare unions cannot be used to reinterpret memory. For that, use {#link|@ptrCast#},
-      or use an {#link|extern union#} or a {#link|packed union#} which have
+      or use an {#link|extern union#} or a {#link|bitpack union#} which have
       guaranteed in-memory layout.
       {#link|Accessing the non-active field|Wrong Union Field Access#} is
       safety-checked {#link|Illegal Behavior#}:
@@ -2489,7 +2555,7 @@ or
 
       <p>
       In order to use {#link|switch#} with a union, it must be a {#link|tagged union|Tagged union#}
-      or a {#link|packed union#}.
+      or a {#link|bitpack union#}.
       </p>
       <p>
       To initialize a union when the tag is a {#link|comptime#}-known name, see {#link|@unionInit#}.
@@ -2538,16 +2604,16 @@ or
       {#see_also|extern struct#}
       {#header_close#}
 
-      {#header_open|packed union#}
-      <p>A {#syntax#}packed union{#endsyntax#} has well-defined in-memory layout and is eligible
-          to be in a {#link|packed struct#}.</p>
-      <p>All fields in a packed union must have the same {#link|@bitSizeOf#}.</p>
+      {#header_open|bitpack union#}
+      <p>A {#syntax#}bitpack union{#endsyntax#} has well-defined in-memory layout and is eligible
+          to be in a {#link|bitpack struct#}.</p>
+      <p>All fields in a bitpack union must have the same {#link|@bitSizeOf#}.</p>
 
       <p>
-      Equating packed unions results in a comparison of the backing integer,
+      Equating bitpack unions results in a comparison of the backing integer,
       and only works for the {#syntax#}=={#endsyntax#} and {#syntax#}!={#endsyntax#} {#link|Operators#}.
       </p>
-      {#code|test_packed_union_equality.zig#}
+      {#code|test_bitpack_union_equality.zig#}
 
       {#see_also|@backingInt|@fromBackingInt#}
       {#header_close#}
@@ -3621,14 +3687,14 @@ void do_a_thing(struct Foo *foo) {
       <ul>
           <li>{#link|@bitCast#} - change type but maintain bit representation</li>
           <li>{#link|@alignCast#} - make a pointer have more alignment</li>
-          <li>{#link|@fromBackingInt#} - obtain an enum or a packed struct/union value based on its backing integer</li>
+          <li>{#link|@fromBackingInt#} - obtain an enum or a bitpack struct/union value based on its backing integer</li>
           <li>{#link|@errorFromInt#} - obtain an error code based on its integer value</li>
           <li>{#link|@errorCast#} - convert to a smaller error set</li>
           <li>{#link|@floatCast#} - convert a larger float to a smaller float</li>
           <li>{#link|@floatFromInt#} - convert an integer to a float value</li>
           <li>{#link|@intCast#} - convert between integer types</li>
           <li>{#link|@intFromBool#} - convert true to 1 and false to 0</li>
-          <li>{#link|@backingInt#} - obtain the backing integer value of an enum or a packed struct/union</li>
+          <li>{#link|@backingInt#} - obtain the backing integer value of an enum or a bitpack struct/union</li>
           <li>{#link|@intFromError#} - obtain the integer value of an error code</li>
           <li>{#link|@round#}, {#link|@floor#}, {#link|@ceil#}, {#link|@trunc#} - float to integer conversion</li>
           <li>{#link|@intFromPtr#} - obtain the address of a pointer</li>
@@ -4433,7 +4499,7 @@ comptime {
       </p>
       <p>
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#}, a float,
-      an integer, an enum, or a packed struct.
+      an integer, an enum, or a bitpack struct.
       </p>
       <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       {#see_also|@atomicStore|@atomicRmw||@cmpxchgWeak|@cmpxchgStrong#}
@@ -4447,7 +4513,7 @@ comptime {
       </p>
       <p>
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#}, a float,
-      an integer, an enum, or a packed struct.
+      an integer, an enum, or a bitpack struct.
       </p>
       <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       <p>{#syntax#}AtomicRmwOp{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicRmwOp{#endsyntax#}.</p>
@@ -4461,7 +4527,7 @@ comptime {
       </p>
       <p>
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#}, a float,
-      an integer, an enum, or a packed struct.
+      an integer, an enum, or a bitpack struct.
       </p>
       <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
       {#see_also|@atomicLoad|@atomicRmw|@cmpxchgWeak|@cmpxchgStrong#}
@@ -4470,7 +4536,7 @@ comptime {
       {#header_open|@backingInt#}
       <pre>{#syntax#}@backingInt(enum_or_bitpack: T) BackingInt(T){#endsyntax#}</pre>
       <p>
-      Converts an {#link|enum#}, a {#link|packed struct#} or a {#link|packed union#} value
+      Converts an {#link|enum#}, a {#link|bitpack struct#} or a {#link|bitpack union#} value
       to its backing integer.
       </p>
       <p>
@@ -4519,8 +4585,8 @@ comptime {
       Returns the bit offset of a field relative to its containing struct.
       </p>
       <p>
-      For non {#link|packed structs|packed struct#}, this will always be divisible by {#syntax#}8{#endsyntax#}.
-      For packed structs, non-byte-aligned fields will share a byte offset, but they will have different
+      For non {#link|bitpack structs|bitpack struct#}, this will always be divisible by {#syntax#}8{#endsyntax#}.
+      For bitpack structs, non-byte-aligned fields will share a byte offset, but they will have different
       bit offsets.
       </p>
       {#see_also|@offsetOf#}
@@ -4530,7 +4596,7 @@ comptime {
       <pre>{#syntax#}@bitSizeOf(comptime T: type) comptime_int{#endsyntax#}</pre>
       <p>
       This function returns the number of bits it takes to store {#syntax#}T{#endsyntax#} in memory if the type
-      were a field in a packed struct/union.
+      were a field in a bitpack struct/union.
       The result is a target-specific compile time constant.
       </p>
       <p>
@@ -4657,7 +4723,7 @@ comptime {
       </p>
       <p>
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#},
-      an integer, an enum, or a packed struct.
+      an integer, an enum, or a bitpack struct.
       </p>
       <p>{#syntax#}@typeInfo(@TypeOf(ptr)).pointer.alignment{#endsyntax#} must be {#syntax#}>= @sizeOf(T).{#endsyntax#}</p>
       <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
@@ -4689,7 +4755,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       </p>
       <p>
       {#syntax#}T{#endsyntax#} must be a pointer, a {#syntax#}bool{#endsyntax#},
-      an integer, an enum, or a packed struct.
+      an integer, an enum, or a bitpack struct.
       </p>
       <p>{#syntax#}@typeInfo(@TypeOf(ptr)).pointer.alignment{#endsyntax#} must be {#syntax#}>= @sizeOf(T).{#endsyntax#}</p>
       <p>{#syntax#}AtomicOrder{#endsyntax#} can be found with {#syntax#}@import("std").lang.AtomicOrder{#endsyntax#}.</p>
@@ -5016,8 +5082,8 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#header_open|@fromBackingInt#}
       <pre>{#syntax#}@fromBackingInt(backing_int: BackingInt(T)) T{#endsyntax#}</pre>
       <p>
-      Converts an integer into a {#link|enum#}, a {#link|packed struct#} or a
-      {#link|packed union#} value. The return type is the inferred result type.
+      Converts an integer into a {#link|enum#}, a {#link|bitpack struct#} or a
+      {#link|bitpack union#} value. The return type is the inferred result type.
       </p>
       <p>
       Attempting to convert an integer with no corresponding tag value to an
@@ -5582,7 +5648,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       <p>
       Produces an array or vector where each element is the value
       {#syntax#}element{#endsyntax#}. The return type, including the number of
-      elements, is inferred.
+      elements, is inferred. If the result type is a scalar, `element` is returned.
       </p>
       {#code|test_splat_builtin.zig#}
       {#see_also|Vectors|Arrays|@shuffle#}
@@ -5599,13 +5665,12 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       Not every operator is available for every vector element type:
       </p>
       <ul>
-          <li>Every operator is available for {#link|integer|Integers#} vectors.</li>
-          <li>{#syntax#}.And{#endsyntax#}, {#syntax#}.Or{#endsyntax#},
-            {#syntax#}.Xor{#endsyntax#} are additionally available for
-            {#syntax#}bool{#endsyntax#} vectors,</li>
-          <li>{#syntax#}.Min{#endsyntax#}, {#syntax#}.Max{#endsyntax#},
-            {#syntax#}.Add{#endsyntax#}, {#syntax#}.Mul{#endsyntax#} are
-            additionally available for {#link|floating point|Floats#} vectors,</li>
+          <li>{#link|Integer|Integers#} vectors support all operators.</li>
+          <li>{#syntax#}bool{#endsyntax#} vectors support the {#syntax#}.And{#endsyntax#},
+          {#syntax#}.Or{#endsyntax#}, and {#syntax#}.Xor{#endsyntax#} operators.</li>
+          <li>{#link|Floating point|Floats#} vectors support the {#syntax#}.Min{#endsyntax#},
+          {#syntax#}.Max{#endsyntax#}, {#syntax#}.Add{#endsyntax#}, and {#syntax#}.Mul{#endsyntax#}
+          operators.</li>
       </ul>
       <p>
       Note that {#syntax#}.Add{#endsyntax#} and {#syntax#}.Mul{#endsyntax#}
@@ -6364,7 +6429,7 @@ fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_val
       {#code|runtime_wrong_union_field_access.zig#}
 
       <p>
-      This safety is not available for {#syntax#}extern{#endsyntax#} or {#syntax#}packed{#endsyntax#} unions.
+      This safety is not available for {#syntax#}extern{#endsyntax#} or {#syntax#}bitpack{#endsyntax#} unions.
       </p>
       <p>
       To change the active field of a union, assign the entire union, like this:
@@ -7412,6 +7477,18 @@ fn readU32Be() u32 {}
         </tr>
         <tr>
           <th scope="row">
+            <pre>{#syntax#}bitpack{#endsyntax#}</pre>
+          </th>
+          <td>
+            The {#syntax#}bitpack{#endsyntax#} keyword before a struct definition changes the struct's in-memory layout
+            to the guaranteed {#syntax#}bitpack{#endsyntax#} layout.
+            <ul>
+              <li>See also {#link|bitpack struct#}</li>
+            </ul>
+          </td>
+        </tr>
+        <tr>
+          <th scope="row">
             <pre>{#syntax#}break{#endsyntax#}</pre>
           </th>
           <td>
@@ -7692,18 +7769,6 @@ fn readU32Be() u32 {}
         </tr>
         <tr>
           <th scope="row">
-            <pre>{#syntax#}packed{#endsyntax#}</pre>
-          </th>
-          <td>
-            The {#syntax#}packed{#endsyntax#} keyword before a struct definition changes the struct's in-memory layout
-            to the guaranteed {#syntax#}packed{#endsyntax#} layout.
-            <ul>
-              <li>See also {#link|packed struct#}</li>
-            </ul>
-          </td>
-        </tr>
-        <tr>
-          <th scope="row">
             <pre>{#syntax#}pub{#endsyntax#}</pre>
           </th>
           <td>
@@ -7870,6 +7935,42 @@ fn readU32Be() u32 {}
       {#header_open|Appendix#}
       {#header_open|Grammar#}
       {#grammar#}
+      {#header_open|Operator Precedence Flowchart#}
+      <p>
+      To help understand the grammar, this flowchart is provided for the operator precedence. 
+      The bottom represents any location where an expression may occur and the topmost row represents
+      a parenthesized expression. An operator will have a higher precedence (and therefore be the parent) to 
+      another node if it is strictly lower on the tree (having a directed path from one to another). This is inverted from classical precedence, but 
+      is closer to how a recursive descent parser views the grammar. 
+      </p>
+      <pre><code>
+                     ┏━━━━━━━━━━━━━━━━━━━┓   
+                     ┃(expr)             ┃                  
+                     ┃x() x[] x.y x.* x.?┃                  
+                     ┃E!T                ┃                  
+                     ┃x{}                ┃                  
+                     ┃!x -x -%x ~x &x ?x ┃                  
+                     ┗━━━━━━━━━▲━━━━━━━━━┛                  
+          ┌─────────────┬──────┴───────┬───────┬──┬──┬─┐         
+          │             │              │       │  │  │ │         
+   ┏━━━━━━┷━━━━━┓╭Non╌Chaining╮ ╭Non╌Chaining╮┏┷┓┏┷┓┏┷┓│         
+   ┃* *% *| / ||┃╎      %     ╎ ╎ &lt;&lt; &lt;&lt;|  >> ╎┃&┃┃^┃┃|┃│         
+   ┗━━━━━━▲━━━━━┛╰╌╌╌╌╌╌▲╌╌╌╌╌╯ ╰╌╌╌╌╌╌▲╌╌╌╌╌╯┗▲┛┗▲┛┗▲┛│         
+       ┏━━┷━━━━━━━━━━━━━┷━┓       ┌────┴───────┴──┴──┘ │         
+       ┃+ - +% -% +| -| ++┃       │                    │         
+       ┗━━━━━━━━━━━▲━━━━━━┛       │                    │         
+                  ╭┴╌Non-Chaining╌┴╮                   │         
+                  ╎== !=  &lt; &lt;= >= >╎                   │         
+                  ╰╌╌╌▲╌╌╌╌▲╌╌╌╌╌╌╌╯      ┌──────┬─────┘                
+                    ┏━┷━┓┏━┷━┓        ┏━━━┷━━┓┏━━┷━━┓                  
+                    ┃and┃┃or ┃        ┃orelse┃┃catch┃                  
+                    ┗━▲━┛┗━▲━┛        ┗━━━▲━━┛┗━━▲━━┛                  
+                   ╭╌╌┴╌╌╌╌┴╌╌╌╌╌╌╌╌╌╌╌╌╌╌┴╌╌╌╌╌╌┴╌╮ 
+                   ╎    Any expression location    ╎ 
+                   ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯ 
+                                                              
+      </code></pre>
+      {#header_close#}
       {#header_close#}
       {#header_open|Zen#}
       <ul>
