@@ -125,7 +125,7 @@ fn hoverSymbolResolvedType(
         };
 
         for (possible_types.keys()) |ty| {
-            const type_str = try ty.stringifyTypeOf(analyser, options);
+            const type_str = try ty.stringifyTypeOf(analyser, options) orelse continue;
 
             if (ty.ipIndex() != null) {
                 const val_str = try ty.stringifyTypeVal(analyser, options);
@@ -350,7 +350,15 @@ fn hoverDefinitionStructInit(
         .contents = .{
             .markup_content = .{
                 .kind = markup_kind,
-                .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
+                .value = try hoverSymbolResolved(
+                    arena,
+                    markup_kind,
+                    doc_strings.items,
+                    def_str orelse "unknown",
+                    &.{"type"},
+                    false,
+                    referenced_types,
+                ),
             },
         },
         .range = offsets.tokenToRange(&handle.tree, token, offset_encoding),

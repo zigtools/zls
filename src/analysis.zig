@@ -4544,14 +4544,16 @@ pub const Type = struct {
         }
     }
 
-    pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
+    /// Returns `null` if the type is unknown.
+    pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}!?[]const u8 {
         const typeof = try ty.typeOf(analyser);
+        if (typeof.ipIndex() == .unknown_type) return null;
         var aw: std.Io.Writer.Allocating = .init(analyser.arena);
         defer aw.deinit();
         rawStringify(typeof, &aw.writer, analyser, options) catch |err| switch (err) {
             error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
         };
-        return aw.toOwnedSlice();
+        return try aw.toOwnedSlice();
     }
 
     pub fn stringifyTypeVal(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {

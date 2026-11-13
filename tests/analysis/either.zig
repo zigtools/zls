@@ -1,5 +1,8 @@
-const UnknownType: type = undefined;
+const UnknownType: type = UnknownType;
+//    ^^^^^^^^^^^ (type)(unknown)
+
 const unknown_value: UnknownType = undefined;
+//    ^^^^^^^^^^^^^ (unknown)()
 
 const non_type_and_type: if (true) 42 else i32 = unknown_value;
 //    ^^^^^^^^^^^^^^^^^ (unknown)()

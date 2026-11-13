@@ -183,11 +183,7 @@ pub fn main(init: std.process.Init) Error!void {
             return err;
         };
 
-        const expect_unknown = (if (test_item.expected_type) |expected_type| std.mem.eql(u8, expected_type, "unknown") else false) and
-            (if (test_item.expected_value) |expected_value| std.mem.eql(u8, expected_value, "unknown") else true) and
-            test_item.expected_error == null;
-
-        const ty = blk: {
+        const ty: Analyser.Type = blk: {
             const decl_maybe: ?Analyser.DeclWithHandle = switch (ctx) {
                 .global => try analyser.lookupSymbolGlobal(handle, identifier, identifier_loc.start),
                 .enum_literal => decl: {
@@ -224,24 +220,15 @@ pub fn main(init: std.process.Init) Error!void {
 
             break :blk try decl.resolveType(&analyser);
         } orelse {
+            const expect_unknown = std.mem.eql(u8, test_item.expected_type orelse "", "unknown") and
+                std.mem.eql(u8, test_item.expected_value orelse "unknown", "unknown") and
+                test_item.expected_error == null;
             if (expect_unknown) continue;
             try error_builder.msgAtLoc("failed to resolve type of '{s}'", file_path, annotation.loc, .err, .{
                 identifier,
             });
             continue;
         };
-
-        if (expect_unknown) {
-            const actual_type = try ty.stringifyTypeOf(
-                &analyser,
-                .{ .truncate_container_decls = false },
-            );
-
-            try error_builder.msgAtLoc("expected unknown but got `{s}`", file_path, identifier_loc, .err, .{
-                actual_type,
-            });
-            continue;
-        }
 
         if (test_item.expected_error) |_| {
             @panic("unsupported");
@@ -251,7 +238,7 @@ pub fn main(init: std.process.Init) Error!void {
             const actual_type = try ty.stringifyTypeOf(
                 &analyser,
                 .{ .truncate_container_decls = false },
-            );
+            ) orelse "unknown";
 
             if (!std.mem.eql(u8, expected_type, actual_type)) {
                 try error_builder.msgAtLoc("expected type `{s}` but got `{s}`", file_path, identifier_loc, .err, .{
@@ -262,7 +249,7 @@ pub fn main(init: std.process.Init) Error!void {
             }
         }
 
-        if (test_item.expected_value) |expected_value| {
+        if (test_item.expected_value) |expected_value| blk: {
             if (ty.data != .ip_index and !ty.is_type_val) {
                 try error_builder.msgAtLoc("unsupported value check `{s}`", file_path, identifier_loc, .err, .{
                     expected_value,
@@ -270,7 +257,14 @@ pub fn main(init: std.process.Init) Error!void {
                 continue;
             }
 
-            const actual_value = try ty.stringifyTypeVal(
+            const expected_is_unknown_value = std.mem.eql(u8, expected_value, "unknown");
+            const actual_is_unknown_value = switch (ty.data) {
+                .ip_index => |payload| if (payload.index) |idx| ip.isUnknown(idx) else true,
+                else => false,
+            };
+            if (expected_is_unknown_value and actual_is_unknown_value) break :blk;
+
+            const actual_value = if (actual_is_unknown_value) "unknown" else try ty.stringifyTypeVal(
                 &analyser,
                 .{ .truncate_container_decls = false },
             );

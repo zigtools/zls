@@ -1581,13 +1581,16 @@ fn collectContainerFields(
                 var score = kindToSortScore(kind);
 
                 const detail = detail: {
-                    const type_str = if (maybe_resolved_ty) |ty|
-                        try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false })
-                    else if (field.ast.type_expr.unwrap()) |type_expr| typ: {
-                        const type_str = offsets.nodeToSlice(tree, type_expr);
-                        if (std.mem.eql(u8, name, type_str) and kind == .EnumMember) break :detail null;
-                        break :typ type_str;
-                    } else break :detail null;
+                    const type_str = type_str: {
+                        if (maybe_resolved_ty) |ty| {
+                            if (try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = false })) |str| break :type_str str;
+                        }
+                        if (field.ast.type_expr.unwrap()) |type_expr| {
+                            const type_str = offsets.nodeToSlice(tree, type_expr);
+                            if (std.mem.eql(u8, name, type_str) and kind == .EnumMember) break :detail null;
+                            break :type_str type_str;
+                        } else break :detail null;
+                    };
                     if (field.ast.value_expr.unwrap()) |value_expr| {
                         if (kind == .Field) score += 1;
                         const value_str = offsets.nodeToSlice(tree, value_expr);

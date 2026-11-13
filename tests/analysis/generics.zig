@@ -237,7 +237,7 @@ const identity_of_f64 = Identity(f64);
 //    ^^^^^^^^^^^^^^^ (f64)()
 
 const identity_of_unknown_type = Identity(@as(type, undefined));
-//    ^^^^^^^^^^^^^^^^^^^^^^^^ ((unknown type))()
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
 
 fn anytypeFn1(a: anytype) @TypeOf(a) {
     return a;

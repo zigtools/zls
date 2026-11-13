@@ -204,6 +204,33 @@ test "integer literal" {
     , .{ .markup_kind = .plaintext });
 }
 
+test "unknown type" {
+    try testHover(
+        \\const UnknownType<cursor>: type = UnknownType;
+    ,
+        \\```zig
+        \\const UnknownType: type = UnknownType
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+}
+
+test "unknown value of unknown type" {
+    try testHover(
+        \\const UnknownType: type = UnknownType;
+        \\const unknown_value<cursor>: UnknownType = undefined;
+    ,
+        \\```zig
+        \\const unknown_value: UnknownType = undefined
+        \\```
+        \\```zig
+        \\(unknown)
+        \\```
+    );
+}
+
 test "builtin" {
     try testHover(
         \\@intFr<cursor>omBool(5);
