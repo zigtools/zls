@@ -1,5 +1,5 @@
-//! This file implements a standalone executable that is used by
-//! `add_analysis_cases.zig` to run code analysis tests.
+//! This file implements a standalone executable that is used
+//! by the build system to run code analysis tests.
 //! See the `./analysis` subdirectory.
 
 const std = @import("std");
