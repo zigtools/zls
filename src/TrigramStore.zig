@@ -517,7 +517,7 @@ const CuckooFilter = struct {
         index_2: BucketIndex,
 
         pub fn initFromTrigram(trigram: Trigram, len: u32) Triplet {
-            const split: packed struct {
+            const split: bitpack struct {
                 fingerprint: Fingerprint,
                 padding: u24,
                 index_1: u32,

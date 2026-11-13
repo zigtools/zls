@@ -265,9 +265,9 @@ const c_minus_c = c_u32 - c_u32;
 // pointer with sentinel
 //
 
-const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const packed struct {};
-//    ^^^^^^^^^^^^^^^^^^^^^^^ (type)([*:?]const packed struct {})
-//                                 ^ (packed struct {})()
+const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const bitpack struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (type)([*:?]const bitpack struct {})
+//                                 ^ (bitpack struct {})()
 //                                               ^^^^^^^^ (AddressSpace)()
 
 var runtime_index: usize = 5;

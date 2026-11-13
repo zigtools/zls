@@ -233,7 +233,7 @@ test "builtin with multi line parameters" {
         \\) void
         \\This builtin function dereferences a pointer to a `T` and atomically stores the given value.
         \\
-        \\`T` must be a pointer, a `bool`, a float, an integer, an enum, or a packed struct.
+        \\`T` must be a pointer, a `bool`, a float, an integer, an enum, or a bitpack struct.
         \\
         \\`AtomicOrder` can be found with `@import("std").lang.AtomicOrder`.
     , .{ .markup_kind = .plaintext });
@@ -241,10 +241,10 @@ test "builtin with multi line parameters" {
 
 test "struct" {
     try testHover(
-        \\const Str<cursor>uct = packed struct(u32) {};
+        \\const Str<cursor>uct = bitpack struct(u32) {};
     ,
         \\```zig
-        \\const Struct = packed struct(u32)
+        \\const Struct = bitpack struct(u32)
         \\```
         \\```zig
         \\(type)
