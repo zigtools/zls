@@ -280,7 +280,7 @@ const AllowZeroConstPointer = *allowzero const u32;
 //    ^^^^^^^^^^^^^^^^^^^^^ (type)(*allowzero const u32)
 
 const AddrspacePointer = *addrspace(.uniform) u32;
-//    ^^^^^^^^^^^^^^^^ (type)(*u32)
+//    ^^^^^^^^^^^^^^^^ (type)(*addrspace(.uniform) u32)
 
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
