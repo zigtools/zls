@@ -213,11 +213,6 @@ const tag_name = @tagName(type_enum_literal);
 const error_name = @errorName(error.Foo);
 //    ^^^^^^^^^^ ([:0]const u8)()
 
-comptime {
-    // Use @compileLog to verify the expected type with the compiler
-    // @compileLog(vector_builtin_13);
-}
-
 fn builtin_calls() void {
     @branchHint(.none);
     //          ^^^^^ (BranchHint)()

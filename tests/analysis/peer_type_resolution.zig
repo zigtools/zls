@@ -170,9 +170,6 @@ pub fn main() !void {
     _ = noreturn_1;
     //  ^^^^^^^^^^ (S)()
 
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(error_union_0);
-
     _ = &runtime_bool;
 }
 

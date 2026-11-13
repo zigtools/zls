@@ -172,8 +172,3 @@ const slice3 = array[1..];
 const unknown_type: type = undefined;
 const invalid_array_access = unknown_type[5];
 //    ^^^^^^^^^^^^^^^^^^^^ (unknown)()
-
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(some_array);
-}

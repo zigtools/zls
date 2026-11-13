@@ -273,8 +273,3 @@ const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const bitpack struct 
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
 var runtime_i8: i8 = -1;
-
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(many_u32_slice_len_comptime);
-}

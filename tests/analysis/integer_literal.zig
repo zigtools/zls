@@ -54,7 +54,3 @@ const comptime_plus_u8 = 2 + @as(u8, 3);
 
 const u8_plus_comptime = @as(u8, 2) + 3;
 //    ^^^^^^^^^^^^^^^^ (u8)(unknown) TODO this should be `5`
-
-comptime {
-    @compileLog(comptime_div);
-}

@@ -254,8 +254,3 @@ const anytype_2_u8_u16 = anytypeFn2(@as(u8, 42), @as(u16, 42));
 //    ^^^^^^^^^^^^^^^^ (u8)() TODO this should be `u16`
 const anytype_2_i8_i16 = anytypeFn2(@as(i8, 42), @as(i16, 42));
 //    ^^^^^^^^^^^^^^^^ (i8)() TODO this should be `i16`
-
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(anytype_2_i8_i16);
-}

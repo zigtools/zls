@@ -67,8 +67,3 @@ comptime {
     _ = inferred_tuple_0;
     _ = inferred_tuple_1;
 }
-
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(some_tuple);
-}
