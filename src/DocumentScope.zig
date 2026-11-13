@@ -78,7 +78,6 @@ pub const Declaration = union(enum) {
     /// - `if (condition) |_| {} else |identifier| {}`
     /// - `while (condition) |_| {} else |identifier| {}`
     /// - `condition catch |identifier| {}`
-    /// - `errdefer |identifier| {}` (condition is `.none`)
     error_union_error: struct {
         identifier: Ast.TokenIndex,
         condition: Ast.Node.OptionalIndex,
