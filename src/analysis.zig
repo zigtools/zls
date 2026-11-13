@@ -2162,6 +2162,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
             const sentinel = try analyser.resolveOptionalIPValue(ptr_info.ast.sentinel, handle);
 
+            const address_space: std.lang.AddressSpace = if (ptr_info.ast.addrspace_node.unwrap()) |addrspace_node| blk: {
+                if (tree.nodeTag(addrspace_node) != .enum_literal) break :blk .generic;
+                const name = offsets.identifierTokenToNameSlice(&handle.tree, tree.nodeMainToken(addrspace_node));
+                break :blk std.meta.stringToEnum(std.lang.AddressSpace, name) orelse .generic;
+            } else .generic;
+
             const alignment: u16 = if (ptr_info.ast.align_node.unwrap()) |align_node|
                 try analyser.resolveIntegerLiteral(u16, .of(align_node, handle)) orelse 0
             else
@@ -2176,7 +2182,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 .is_volatile = is_volatile,
                 .is_allowzero = is_allowzero,
                 .alignment = alignment,
-                .address_space = .generic,
+                .address_space = address_space,
             });
         },
         .array_type,
