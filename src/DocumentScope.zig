@@ -88,6 +88,10 @@ pub const Declaration = union(enum) {
     /// - `switch (condition) { inline .case => |_, tag| {} }`
     /// - `switch (condition) { inline else => |_, tag| {} }`
     switch_inline_tag_payload: Switch,
+    // identifier: {}
+    // identifier: while () {}
+    // identifier: for () {}
+    // identifier: switch () {}
     label: struct {
         identifier: Ast.TokenIndex,
         block: Ast.Node.Index,
