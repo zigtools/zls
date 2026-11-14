@@ -19,3 +19,27 @@ const ErrorUnionUnknownError = UnknownType!u32;
 
 const ErrorUnionUnknownPayload = Error!UnknownType;
 //    ^^^^^^^^^^^^^^^^^^^^^^^^ (type)(error{Foo,Bar}!(unknown type))
+
+const ErrorSet = error{A} || error{B};
+//    ^^^^^^^^ (type)(error{A,B})
+
+const ErrorSetWithUnknown = error{A} || UnknownType;
+//    ^^^^^^^^^^^^^^^^^^^ (type)(error{A, ... })
+
+const ErrorSetWithUnknown2 = UnknownType || error{B};
+//    ^^^^^^^^^^^^^^^^^^^^ (type)(error{B, ... })
+
+const ErrorSetWithUnknown3 = UnknownType || error{A} || error{B};
+//    ^^^^^^^^^^^^^^^^^^^^ (type)(error{A,B, ... })
+
+const AllUnknown = UnknownType || UnknownType;
+//    ^^^^^^^^^^ (type)(error{ ... })
+
+const AnyerrorUnknown = anyerror || UnknownType;
+//    ^^^^^^^^^^^^^^^ (type)(anyerror)
+
+const UnknownAnyerror = UnknownType || anyerror;
+//    ^^^^^^^^^^^^^^^ (type)(anyerror)
+
+const AnyerrorPartiallyUnknown = anyerror || error{A} || UnknownType;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^ (type)(anyerror)

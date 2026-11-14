@@ -2222,8 +2222,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
         .merge_error_sets => {
             const lhs, const rhs = tree.nodeData(node).node_and_node;
-            const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse return null;
-            const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse return null;
+            const lhs_index = try analyser.resolveErrorSetIPIndex(.of(lhs, handle)) orelse .unknown_type;
+            const rhs_index = try analyser.resolveErrorSetIPIndex(.of(rhs, handle)) orelse .unknown_type;
             const ip_index = try analyser.ip.errorSetMerge(lhs_index, rhs_index);
             return Type.fromIP(analyser, .type_type, ip_index);
         },
@@ -2242,7 +2242,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 try strings.put(analyser.gpa, index, {});
             }
             const names = try analyser.ip.getStringSlice(strings.keys());
-            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names } });
+            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names, .flags = .{ .has_unknown = false } } });
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2801,10 +2801,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             const name = offsets.identifierTokenToNameSlice(tree, name_token);
             const name_index = try analyser.ip.string_pool.getOrPutString(analyser.store.io, analyser.gpa, name);
 
-            const error_set_type = try analyser.ip.get(.{ .error_set_type = .{
-                .owner_decl = .none,
-                .names = try analyser.ip.getStringSlice(&.{name_index}),
-            } });
+            const error_set_type = try analyser.ip.get(.{
+                .error_set_type = .{
+                    .owner_decl = .none,
+                    .names = try analyser.ip.getStringSlice(&.{name_index}),
+                    .flags = .{ .has_unknown = false },
+                },
+            });
             const error_value = try analyser.ip.get(.{ .error_value = .{
                 .ty = error_set_type,
                 .error_tag_name = name_index,
