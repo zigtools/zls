@@ -814,29 +814,18 @@ fn resolveGenericTypeInternal(
     return resolved;
 }
 
-fn findReturnStatementInternal(tree: *const Ast, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
+fn findReturnStatement(tree: *const Ast, body: Ast.Node.Index) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
     var buffer: [2]Ast.Node.Index = undefined;
     const statements = tree.blockStatements(&buffer, body) orelse return null;
 
     for (statements) |child_idx| {
-        if (tree.nodeTag(child_idx) == .@"return") {
-            if (already_found.*) return null;
-            already_found.* = true;
-            result = child_idx;
-            continue;
-        }
-
-        result = findReturnStatementInternal(tree, child_idx, already_found);
+        if (tree.nodeTag(child_idx) != .@"return") continue;
+        result = child_idx;
     }
 
     return result;
-}
-
-fn findReturnStatement(tree: *const Ast, body: Ast.Node.Index) ?Ast.Node.Index {
-    var already_found = false;
-    return findReturnStatementInternal(tree, body, &already_found);
 }
 
 /// if `func_type_param` is callable, returns an instance of the return type.
@@ -2876,11 +2865,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
         .enum_literal => {
             const source_token = tree.tokenStart(tree.nodeMainToken(node));
-            const lineage = try ast.nodesOverlappingIndex(analyser.arena, tree, source_token);
-            defer analyser.arena.free(lineage);
+            const ancestors = try ast.nodesOverlappingIndex(analyser.arena, tree, source_token);
+            defer analyser.arena.free(ancestors);
 
             const tag = offsets.identifierTokenToNameSlice(tree, tree.nodeMainToken(node));
-            const decl, const type_maybe = (try analyser.lookupSymbolFieldInit(handle, tag, node, lineage[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
+            const decl, const type_maybe = (try analyser.lookupSymbolFieldInit(handle, tag, node, ancestors[1..])) orelse return Type.fromIP(analyser, .enum_literal_type, null);
             return type_maybe orelse decl.resolveType(analyser);
         },
 
@@ -3921,29 +3910,39 @@ pub const Type = struct {
         var deduplicator: Deduplicator = .empty;
         defer deduplicator.deinit(arena);
 
-        const has_type_val = for (entries) |entry| {
-            if (entry.type.data == .compile_error) {
-                continue;
-            }
-            break entry.type.is_type_val;
-        } else entries[0].type.is_type_val;
+        var has_type_val: bool = false;
+        var has_useful_type: bool = false;
+        for (entries) |entry| {
+            if (entry.type.data == .compile_error) continue;
+            if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .noreturn_type) continue;
+            if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .undefined_type) continue;
+
+            has_useful_type = true;
+            if (entry.type.is_type_val) has_type_val = true;
+        }
 
         for (entries) |entry| {
+            if (has_useful_type) {
+                if (entry.type.data == .compile_error) continue;
+                if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .noreturn_type) continue;
+                if (entry.type.data == .ip_index and entry.type.data.ip_index.type == .undefined_type) continue;
+            }
             try deduplicator.put(
                 arena,
                 .{ .type_data = entry.type.data, .descriptor = entry.descriptor },
                 {},
             );
-            if (entry.type.data == .compile_error) {
-                continue;
-            }
             if (entry.type.is_type_val != has_type_val) {
                 return null;
             }
         }
 
-        if (deduplicator.count() == 1)
-            return entries[0].type;
+        if (deduplicator.count() == 0) unreachable;
+
+        if (deduplicator.count() == 1) return .{
+            .data = deduplicator.keys()[0].type_data,
+            .is_type_val = has_type_val,
+        };
 
         return .{
             .data = .{ .either = try arena.dupe(Type.Data.EitherEntry, deduplicator.keys()) },
@@ -4537,14 +4536,16 @@ pub const Type = struct {
         }
     }
 
-    pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {
+    /// Returns `null` if the type is unknown.
+    pub fn stringifyTypeOf(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}!?[]const u8 {
         const typeof = try ty.typeOf(analyser);
+        if (typeof.ipIndex() == .unknown_type) return null;
         var aw: std.Io.Writer.Allocating = .init(analyser.arena);
         defer aw.deinit();
         rawStringify(typeof, &aw.writer, analyser, options) catch |err| switch (err) {
             error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
         };
-        return aw.toOwnedSlice();
+        return try aw.toOwnedSlice();
     }
 
     pub fn stringifyTypeVal(ty: Type, analyser: *Analyser, options: FormatOptions) error{OutOfMemory}![]const u8 {

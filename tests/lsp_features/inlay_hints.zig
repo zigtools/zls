@@ -534,7 +534,7 @@ test "capture value with catch" {
 test "truncate anonymous container declarations" {
     try testInlayHints(
         \\const A<struct {...}> = @as(struct { a: u32 }, undefined);
-        \\const B<packed union {...}> = @as(packed union { a: u32 }, undefined);
+        \\const B<bitpack union {...}> = @as(bitpack union { a: u32 }, undefined);
         \\const C<union(enum) {...}> = @as(union(enum) { a: u32 }, undefined);
         \\const D<union(u32) {...}> = @as(union(u32) { a: u32 }, undefined);
     , .{ .kind = .Type });

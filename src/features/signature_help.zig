@@ -309,7 +309,6 @@ fn getSignatureInfo(
                         loc.start += 1;
 
                         const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, loc.start);
-                        if (ancestors.len == 0) return null;
 
                         const decl, const type_maybe = try analyser.lookupSymbolFieldInit(
                             handle,

@@ -265,16 +265,11 @@ const c_minus_c = c_u32 - c_u32;
 // pointer with sentinel
 //
 
-const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const packed struct {};
-//    ^^^^^^^^^^^^^^^^^^^^^^^ (type)([*:?]const packed struct {})
-//                                 ^ (packed struct {})()
+const ManyPointerWithSentinel = [*:.{}]addrspace(.generic) const bitpack struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^^ (type)([*:?]const bitpack struct {})
+//                                 ^ (bitpack struct {})()
 //                                               ^^^^^^^^ (AddressSpace)()
 
 var runtime_index: usize = 5;
 var runtime_u8: u8 = 1;
 var runtime_i8: i8 = -1;
-
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(many_u32_slice_len_comptime);
-}

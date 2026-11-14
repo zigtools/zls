@@ -78,7 +78,6 @@ pub const Declaration = union(enum) {
     /// - `if (condition) |_| {} else |identifier| {}`
     /// - `while (condition) |_| {} else |identifier| {}`
     /// - `condition catch |identifier| {}`
-    /// - `errdefer |identifier| {}` (condition is `.none`)
     error_union_error: struct {
         identifier: Ast.TokenIndex,
         condition: Ast.Node.OptionalIndex,
@@ -89,6 +88,10 @@ pub const Declaration = union(enum) {
     /// - `switch (condition) { inline .case => |_, tag| {} }`
     /// - `switch (condition) { inline else => |_, tag| {} }`
     switch_inline_tag_payload: Switch,
+    // identifier: {}
+    // identifier: while () {}
+    // identifier: for () {}
+    // identifier: switch () {}
     label: struct {
         identifier: Ast.TokenIndex,
         block: Ast.Node.Index,
@@ -241,11 +244,11 @@ pub const Scope = struct {
         }
     };
 
-    pub const Data = packed union {
+    pub const Data = bitpack union {
         ast_node: Ast.Node.Index,
     };
 
-    pub const SmallLoc = packed struct {
+    pub const SmallLoc = bitpack struct {
         start: u32,
         end: u32,
     };
@@ -270,7 +273,7 @@ pub const Scope = struct {
         },
     };
 
-    data: packed struct(u64) {
+    data: bitpack struct(u64) {
         tag: Tag,
         is_child_scopes_small: bool,
         is_child_decls_small: bool,

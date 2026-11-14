@@ -3,9 +3,9 @@ const ArrayType = [3]u8;
 const ArrayTypeWithSentinel = [3:0]u8;
 //    ^^^^^^^^^^^^^^^^^^^^^ (type)([3:0]u8)
 
-const ArrayTypeWithSentinel2 = [3:.{}]packed struct {};
-//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3:?]packed struct {})
-//                                ^ (packed struct {})()
+const ArrayTypeWithSentinel2 = [3:.{}]bitpack struct {};
+//    ^^^^^^^^^^^^^^^^^^^^^^ (type)([3:?]bitpack struct {})
+//                                ^ (bitpack struct {})()
 
 const InvalidArrayTypeAccess0 = ArrayType[0];
 //    ^^^^^^^^^^^^^^^^^^^^^^^ (unknown)()
@@ -172,8 +172,3 @@ const slice3 = array[1..];
 const unknown_type: type = undefined;
 const invalid_array_access = unknown_type[5];
 //    ^^^^^^^^^^^^^^^^^^^^ (unknown)()
-
-comptime {
-    // Use @compileLog to verify the expected type with the compiler:
-    // @compileLog(some_array);
-}

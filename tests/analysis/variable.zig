@@ -3,4 +3,4 @@ const variable addrspace(.generic) linksection(.{}) = 0;
 //                                             ^ ([]const u8)()
 
 var bool_var = true;
-//  ^^^^^^^^ (bool)((unknown value))
+//  ^^^^^^^^ (bool)(unknown)

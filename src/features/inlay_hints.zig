@@ -586,7 +586,6 @@ fn writeNodeInlayHint(
 
             const source_index = builder.handle.tree.tokenStart(struct_init.ast.lbrace) + 1;
             const ancestors = try ast.nodesOverlappingIndex(builder.analyser.arena, &builder.handle.tree, source_index);
-            if (ancestors.len == 0) return;
 
             const container_type = try builder.analyser.resolveDeclLiteralExpressionType(
                 builder.handle,
@@ -601,8 +600,7 @@ fn writeNodeInlayHint(
                 const decl = try container_type.lookupSymbol(builder.analyser, name) orelse continue;
                 const ty = try decl.resolveType(builder.analyser) orelse continue;
 
-                const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = true });
-                if (type_str.len == 0) continue;
+                const type_str = try ty.stringifyTypeOf(builder.analyser, .{ .truncate_container_decls = true }) orelse continue;
                 try builder.appendStringHint(
                     name_token,
                     type_str,

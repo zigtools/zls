@@ -125,7 +125,7 @@ fn hoverSymbolResolvedType(
         };
 
         for (possible_types.keys()) |ty| {
-            const type_str = try ty.stringifyTypeOf(analyser, options);
+            const type_str = try ty.stringifyTypeOf(analyser, options) orelse continue;
 
             if (ty.ipIndex() != null) {
                 const val_str = try ty.stringifyTypeVal(analyser, options);
@@ -328,7 +328,6 @@ fn hoverDefinitionStructInit(
     if (handle.tree.tokenTag(token + 1) != .l_brace) return null;
 
     const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
-    if (ancestors.len == 0) return null;
     const resolved_type = try analyser.resolveDeclLiteralExpressionType(
         handle,
         ancestors[0],
@@ -350,7 +349,15 @@ fn hoverDefinitionStructInit(
         .contents = .{
             .markup_content = .{
                 .kind = markup_kind,
-                .value = try hoverSymbolResolved(arena, markup_kind, doc_strings.items, def_str, &.{"type"}, false, referenced_types),
+                .value = try hoverSymbolResolved(
+                    arena,
+                    markup_kind,
+                    doc_strings.items,
+                    def_str orelse "unknown",
+                    &.{"type"},
+                    false,
+                    referenced_types,
+                ),
             },
         },
         .range = offsets.tokenToRange(&handle.tree, token, offset_encoding),
@@ -374,7 +381,6 @@ fn hoverDefinitionEnumLiteral(
     const name = offsets.locToSlice(handle.tree.source, name_loc);
 
     const ancestors = try ast.nodesOverlappingIndex(analyser.arena, &handle.tree, source_index);
-    if (ancestors.len == 0) return null;
 
     const decl, const type_maybe = try analyser.lookupSymbolFieldInit(
         handle,

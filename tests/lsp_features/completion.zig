@@ -3417,7 +3417,7 @@ test "function arguments of @Struct" {
         \\}
     , &.{
         .{ .label = "@\"extern\"", .kind = .EnumMember },
-        .{ .label = "@\"packed\"", .kind = .EnumMember },
+        .{ .label = "@\"bitpack\"", .kind = .EnumMember },
         .{ .label = "auto", .kind = .EnumMember },
     });
 }
@@ -3429,7 +3429,7 @@ test "function arguments of @Union" {
         \\}
     , &.{
         .{ .label = "@\"extern\"", .kind = .EnumMember },
-        .{ .label = "@\"packed\"", .kind = .EnumMember },
+        .{ .label = "@\"bitpack\"", .kind = .EnumMember },
         .{ .label = "auto", .kind = .EnumMember },
     });
 }
@@ -3769,6 +3769,9 @@ test "integer overflow in struct init field without lhs" {
 test "integer overflow in dot completions at beginning of file" {
     try testCompletion(
         \\.<cursor>
+    , &.{});
+    try testCompletion(
+        \\=&.<cursor>
     , &.{});
 }
 
