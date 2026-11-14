@@ -2242,7 +2242,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 try strings.put(analyser.gpa, index, {});
             }
             const names = try analyser.ip.getStringSlice(strings.keys());
-            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names, .has_unknown = .bool_false } });
+            const ip_index = try analyser.ip.get(.{ .error_set_type = .{ .owner_decl = .none, .names = names, .flags = .{ .has_unknown = false } } });
             return Type.fromIP(analyser, .type_type, ip_index);
         },
 
@@ -2805,7 +2805,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
                 .error_set_type = .{
                     .owner_decl = .none,
                     .names = try analyser.ip.getStringSlice(&.{name_index}),
-                    .has_unknown = .bool_false,
+                    .flags = .{ .has_unknown = false },
                 },
             });
             const error_value = try analyser.ip.get(.{ .error_value = .{
