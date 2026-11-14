@@ -3655,7 +3655,7 @@ pub fn onePossibleValue(ip: *InternPool, ty: Index) Index {
             .type_info,
             => Index.none,
 
-            .unknown => unreachable,
+            .unknown => Index.unknown_unknown,
             .generic_poison => unreachable,
         },
         .int_type => |int_info| {

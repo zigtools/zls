@@ -1867,6 +1867,18 @@ test "tagged union - tag" {
     });
 }
 
+test "tagged union - unknown field type" {
+    try testCompletion(
+        \\const UnknownType: type;
+        \\const U = union(enum) {
+        \\    alpha: UnknownType,
+        \\};
+        \\const foo: U = .<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field },
+    });
+}
+
 test "switch cases" {
     // Because current logic is to list all enums if all else fails,
     // the following tests include an extra enum to ensure that we're not just 'getting lucky'
