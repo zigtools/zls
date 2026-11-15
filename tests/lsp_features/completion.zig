@@ -2116,6 +2116,7 @@ test "switch on error set - text edits result" {
         .enable_snippets = false,
     });
 }
+
 test "switch on error set - insert/replace text edits" {
     try testCompletionTextEdit(.{
         .source =
@@ -2171,6 +2172,126 @@ test "switch on error set - Works in a function of a container" {
         \\        _ = idk() catch |err| {
         \\            switch(err) {
         \\                error.<cursor>
+        \\            }
+        \\        };
+        \\    }
+        \\};
+    , &.{
+        .{ .label = "error.E1", .kind = .Constant },
+        .{ .label = "error.E2", .kind = .Constant },
+    });
+}
+
+test "switch on error set (dot completion) - all values are suggested" {
+    try testCompletion(
+        \\const err: error{E1, E2} = undefined;
+        \\switch(err) {
+        \\    .<cursor>
+        \\}
+    , &.{
+        .{ .label = "error.E1", .kind = .Constant },
+        .{ .label = "error.E2", .kind = .Constant },
+    });
+}
+
+test "switch on error set (dot completion) - already used values are not suggested" {
+    try testCompletion(
+        \\const err: error{E1, E2} = undefined;
+        \\switch(err) {
+        \\    error.E1 => {},
+        \\    .<cursor>
+        \\}
+    , &.{
+        .{ .label = "error.E2", .kind = .Constant },
+    });
+}
+
+test "switch on error set (dot completion) - error unions get all values" {
+    try testCompletion(
+        \\const Err2 = error{F1, F2};
+        \\const Err = error{E1, E2} || Err2;
+        \\const err: Err = undefined;
+        \\switch(err) {
+        \\    .<cursor>
+        \\}
+    , &.{
+        .{ .label = "error.E1", .kind = .Constant },
+        .{ .label = "error.E2", .kind = .Constant },
+        .{ .label = "error.F1", .kind = .Constant },
+        .{ .label = "error.F2", .kind = .Constant },
+    });
+}
+
+test "switch on error set (dot completion) - text edits result" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const err: error{E1, E2} = undefined;
+        \\switch(err) {
+        \\    .<cursor>
+        \\}
+        ,
+        .label = "error.E1",
+        .expected_insert_line = "    error.E1",
+        .expected_replace_line = "    error.E1",
+        .enable_snippets = false,
+    });
+}
+
+test "switch on error set (dot completion) - insert/replace text edits" {
+    try testCompletionTextEdit(.{
+        .source =
+        \\const err: error{Err1, Err2} = undefined;
+        \\switch(err) {
+        \\    .E<cursor>0
+        \\}
+        ,
+        .label = "error.Err1",
+        .expected_insert_line = "    error.Err10",
+        .expected_replace_line = "    error.Err1",
+        .enable_snippets = false,
+    });
+}
+
+test "switch on error set (dot completion) - completion inside catch block works" {
+    try testCompletion(
+        \\fn idk() error{ E1, E2 }!void {}
+        \\test {
+        \\  idk() catch |err| {
+        \\      switch (err) {
+        \\          .<cursor>
+        \\      }
+        \\  };
+        \\}
+    , &.{
+        .{ .label = "error.E1", .kind = .Constant },
+        .{ .label = "error.E2", .kind = .Constant },
+    });
+}
+
+test "switch on error set (dot completion) - completion inside catch statement" {
+    if (true) return error.SkipZigTest; // TODO un-skip after https://github.com/zigtools/zls/issues/2341 and/or https://github.com/zigtools/zls/issues/1112
+    try testCompletion(
+        \\fn idk() error{ E1, E2 }!void {}
+        \\test {
+        \\  idk() catch |err| switch (err) {
+        \\      .<cursor>
+        \\  };
+        \\}
+    , &.{
+        .{ .label = "error.E1", .kind = .Constant },
+        .{ .label = "error.E2", .kind = .Constant },
+    });
+}
+
+test "switch on error set (dot completion) - Works in a function of a container" {
+    if (true) return error.SkipZigTest; // TODO un-skip after https://github.com/zigtools/zls/issues/1535
+    try testCompletion(
+        \\fn idk() error{ E1, E2 }!void {}
+        \\pub const Manager = struct {
+        \\    pub fn testIt() void {
+        \\        _ = idk() catch |err| {
+        \\            switch(err) {
+        \\                .<cursor>
         \\            }
         \\        };
         \\    }

@@ -822,6 +822,7 @@ fn completeDot(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
     for (containers) |container| {
         try collectContainerFields(builder, dot_context.likely, container, used_members_set);
+        try collectErrorSetNames(builder, container, used_members_set, loc);
     }
 }
 
@@ -840,7 +841,7 @@ fn completeError(builder: *Builder, loc: offsets.Loc) Analyser.Error!void {
     const used_members_set = try collectUsedMembersSet(builder, dot_context.likely, dot_token_index);
     const containers = try collectContainerNodes(builder, builder.orig_handle, dot_context);
     for (containers) |container| {
-        try collectErrorSetNames(builder, container, used_members_set);
+        try collectErrorSetNames(builder, container, used_members_set, null);
     }
 }
 
@@ -848,6 +849,7 @@ fn collectErrorSetNames(
     builder: *Builder,
     container: Analyser.Type,
     omit_members: std.BufSet,
+    dot_token: ?offsets.Loc,
 ) Analyser.Error!void {
     const ip = builder.analyser.ip;
     const key = switch (container.data) {
@@ -860,10 +862,22 @@ fn collectErrorSetNames(
         const str = names.at(@intCast(idx), ip);
         const name = try builder.arena.print("{f}", .{str.fmt(ip.io, &ip.string_pool)});
         if (omit_members.contains(name)) continue;
+        const textEdit = if (dot_token) |dot| blk: {
+            const tree = &builder.orig_handle.tree;
+            const source = tree.source;
+            const dot_range = offsets.locToRange(source, dot, builder.server.offset_encoding);
+            break :blk createTextEdit(builder, .{
+                .newText = try builder.arena.print("error.{s}", .{name}),
+                .insert = dot_range,
+                // FIXME:
+                .replace = dot_range,
+            });
+        } else null;
         try builder.completions.append(builder.arena, .{
             .label = try builder.arena.print("error.{s}", .{name}),
             .filterText = name,
             .insertText = name,
+            .textEdit = textEdit,
             .kind = .Constant,
         });
     }
