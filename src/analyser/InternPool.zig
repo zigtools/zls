@@ -3550,82 +3550,78 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
 }
 
 pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
-    const has_unknown = ip.isUnknown(a_ty) or ip.isUnknown(b_ty);
-
     // Anything merged with anyerror is anyerror.
     if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
         return .anyerror_type;
     }
 
-    if (has_unknown) {
-        if (ip.isUnknown(a_ty) and ip.isUnknown(b_ty)) {
-            return try ip.get(.{
-                .error_set_type = .{
-                    .owner_decl = .none,
-                    .names = .empty,
-                    .flags = .{
-                        .has_unknown = true,
-                    },
-                },
-            });
-        }
-
-        if (ip.isUnknown(a_ty)) {
-            assert(ip.zigTypeTag(b_ty) == .error_set);
-            const names = ip.indexToKey(b_ty).error_set_type.names;
-            return try ip.get(.{
-                .error_set_type = .{
-                    .owner_decl = .none,
-                    .names = names,
-                    .flags = .{
-                        .has_unknown = true,
-                    },
-                },
-            });
-        }
-
-        if (ip.isUnknown(b_ty)) {
-            assert(ip.zigTypeTag(a_ty) == .error_set);
-            const names = ip.indexToKey(a_ty).error_set_type.names;
-            return try ip.get(.{
-                .error_set_type = .{
-                    .owner_decl = .none,
-                    .names = names,
-                    .flags = .{
-                        .has_unknown = true,
-                    },
-                },
-            });
-        }
-
-        unreachable;
-    } else {
-        assert(ip.zigTypeTag(a_ty) == .error_set);
-        assert(ip.zigTypeTag(b_ty) == .error_set);
-
-        if (a_ty == b_ty) return a_ty;
-
-        const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(ip.gpa, ip);
-        defer ip.gpa.free(a_names);
-
-        const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
-        defer ip.gpa.free(b_names);
-
-        var set: std.array_hash_map.Auto(String, void) = .empty;
-        defer set.deinit(ip.gpa);
-
-        try set.ensureTotalCapacity(ip.gpa, a_names.len + b_names.len);
-
-        for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
-        for (b_names) |name| set.putAssumeCapacity(name, {});
-
-        ip.string_pool.sortStrings(ip.io, set.keys());
-
-        const a_or_b_has_unknown = ip.indexToKey(a_ty).error_set_type.flags.has_unknown or ip.indexToKey(b_ty).error_set_type.flags.has_unknown;
+    if (ip.isUnknown(a_ty) and ip.isUnknown(b_ty)) {
         return try ip.get(.{
-            .error_set_type = .{ .owner_decl = .none, .names = try ip.getStringSlice(set.keys()), .flags = .{ .has_unknown = a_or_b_has_unknown } },
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = .empty,
+                .flags = .{
+                    .has_unknown = true,
+                },
+            },
         });
     }
+
+    if (ip.isUnknown(a_ty)) {
+        assert(ip.zigTypeTag(b_ty) == .error_set);
+        const names = ip.indexToKey(b_ty).error_set_type.names;
+        return try ip.get(.{
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = names,
+                .flags = .{
+                    .has_unknown = true,
+                },
+            },
+        });
+    }
+
+    if (ip.isUnknown(b_ty)) {
+        assert(ip.zigTypeTag(a_ty) == .error_set);
+        const names = ip.indexToKey(a_ty).error_set_type.names;
+        return try ip.get(.{
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = names,
+                .flags = .{
+                    .has_unknown = true,
+                },
+            },
+        });
+    }
+
+    assert(ip.zigTypeTag(a_ty) == .error_set);
+    assert(ip.zigTypeTag(b_ty) == .error_set);
+
+    if (a_ty == b_ty) return a_ty;
+
+    const a_key = ip.indexToKey(a_ty);
+    const a_names = try a_key.error_set_type.names.dupe(ip.gpa, ip);
+    defer ip.gpa.free(a_names);
+
+    const b_key = ip.indexToKey(b_ty);
+    const b_names = try b_key.error_set_type.names.dupe(ip.gpa, ip);
+    defer ip.gpa.free(b_names);
+
+    var set: std.array_hash_map.Auto(String, void) = .empty;
+    defer set.deinit(ip.gpa);
+
+    try set.ensureTotalCapacity(ip.gpa, a_names.len + b_names.len);
+
+    for (a_names) |name| set.putAssumeCapacityNoClobber(name, {});
+    for (b_names) |name| set.putAssumeCapacity(name, {});
+
+    ip.string_pool.sortStrings(ip.io, set.keys());
+
+    const a_or_b_has_unknown = a_key.error_set_type.flags.has_unknown or b_key.error_set_type.flags.has_unknown;
+    return try ip.get(.{
+        .error_set_type = .{ .owner_decl = .none, .names = try ip.getStringSlice(set.keys()), .flags = .{ .has_unknown = a_or_b_has_unknown } },
+    });
 }
 
 /// Asserts the type is a vector or tuple.
