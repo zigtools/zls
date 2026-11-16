@@ -110,6 +110,9 @@ pub const Key = union(enum) {
     pub const ErrorSet = struct {
         owner_decl: Decl.OptionalIndex,
         names: StringSlice,
+        flags: Flags,
+
+        pub const Flags = bitpack struct(u32) { has_unknown: bool, _: u31 = 0 };
     };
 
     pub const Function = struct {
@@ -434,6 +437,7 @@ pub const Key = union(enum) {
                 const b_info = b.error_set_type;
 
                 if (a_info.owner_decl != b_info.owner_decl) return false;
+                if (a_info.flags.has_unknown != b_info.flags.has_unknown) return false;
 
                 if (a_info.names.len != b_info.names.len) return false;
 
@@ -1564,6 +1568,7 @@ fn addExtra(ip: *InternPool, comptime T: type, extra: T) Allocator.Error!u32 {
             Key.Pointer.Flags,
             Key.Pointer.PackedOffset,
             Key.Function.Flags,
+            Key.ErrorSet.Flags,
             => ip.extra.appendAssumeCapacity(@bitCast(item)),
 
             u64,
@@ -1605,6 +1610,7 @@ fn extraData(ip: *const InternPool, comptime T: type, index: u32) T {
             Key.Pointer.Flags,
             Key.Pointer.PackedOffset,
             Key.Function.Flags,
+            Key.ErrorSet.Flags,
             => @bitCast(item),
 
             u64,
@@ -3221,7 +3227,7 @@ fn isUnknownDeepInternal(
         },
         .optional_type => |optional_info| try ip.isUnknownDeepInternal(optional_info.payload_type, set),
         .error_union_type => |error_union_info| try ip.isUnknownDeepInternal(error_union_info.payload_type, set),
-        .error_set_type => false,
+        .error_set_type => return false,
         .enum_type => |enum_index| {
             const enum_info = ip.getEnum(enum_index);
             for (enum_info.values.keys()) |val| {
@@ -3544,20 +3550,62 @@ pub fn scalarType(ip: *InternPool, ty: Index) Index {
 }
 
 pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!Index {
-    assert(ip.zigTypeTag(a_ty) == .error_set);
-    assert(ip.zigTypeTag(b_ty) == .error_set);
-
     // Anything merged with anyerror is anyerror.
     if (a_ty == .anyerror_type or b_ty == .anyerror_type) {
         return .anyerror_type;
     }
 
+    if (ip.isUnknown(a_ty) and ip.isUnknown(b_ty)) {
+        return try ip.get(.{
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = .empty,
+                .flags = .{
+                    .has_unknown = true,
+                },
+            },
+        });
+    }
+
+    if (ip.isUnknown(a_ty)) {
+        assert(ip.zigTypeTag(b_ty) == .error_set);
+        const names = ip.indexToKey(b_ty).error_set_type.names;
+        return try ip.get(.{
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = names,
+                .flags = .{
+                    .has_unknown = true,
+                },
+            },
+        });
+    }
+
+    if (ip.isUnknown(b_ty)) {
+        assert(ip.zigTypeTag(a_ty) == .error_set);
+        const names = ip.indexToKey(a_ty).error_set_type.names;
+        return try ip.get(.{
+            .error_set_type = .{
+                .owner_decl = .none,
+                .names = names,
+                .flags = .{
+                    .has_unknown = true,
+                },
+            },
+        });
+    }
+
+    assert(ip.zigTypeTag(a_ty) == .error_set);
+    assert(ip.zigTypeTag(b_ty) == .error_set);
+
     if (a_ty == b_ty) return a_ty;
 
-    const a_names = try ip.indexToKey(a_ty).error_set_type.names.dupe(ip.gpa, ip);
+    const a_key = ip.indexToKey(a_ty);
+    const a_names = try a_key.error_set_type.names.dupe(ip.gpa, ip);
     defer ip.gpa.free(a_names);
 
-    const b_names = try ip.indexToKey(b_ty).error_set_type.names.dupe(ip.gpa, ip);
+    const b_key = ip.indexToKey(b_ty);
+    const b_names = try b_key.error_set_type.names.dupe(ip.gpa, ip);
     defer ip.gpa.free(b_names);
 
     var set: std.array_hash_map.Auto(String, void) = .empty;
@@ -3570,11 +3618,9 @@ pub fn errorSetMerge(ip: *InternPool, a_ty: Index, b_ty: Index) Allocator.Error!
 
     ip.string_pool.sortStrings(ip.io, set.keys());
 
+    const a_or_b_has_unknown = a_key.error_set_type.flags.has_unknown or b_key.error_set_type.flags.has_unknown;
     return try ip.get(.{
-        .error_set_type = .{
-            .owner_decl = .none,
-            .names = try ip.getStringSlice(set.keys()),
-        },
+        .error_set_type = .{ .owner_decl = .none, .names = try ip.getStringSlice(set.keys()), .flags = .{ .has_unknown = a_or_b_has_unknown } },
     });
 }
 
@@ -4040,6 +4086,12 @@ fn printInternal(ip: *InternPool, ty: Index, writer: *std.Io.Writer, options: Fo
                 if (i != 0) try writer.writeByte(',');
                 const name = error_set_info.names.at(@intCast(i), ip);
                 try writer.print("{f}", .{ip.fmtId(name)});
+            }
+            if (error_set_info.flags.has_unknown) {
+                if (error_set_info.names.len > 0) {
+                    try writer.writeByte(',');
+                }
+                try writer.writeAll(" ... ");
             }
             try writer.writeByte('}');
         },
@@ -4583,16 +4635,19 @@ test "error set type" {
     const empty_error_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
+        .flags = .{ .has_unknown = false },
     } });
 
     const foo_bar_baz_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ foo_name, bar_name, baz_name }),
+        .flags = .{ .has_unknown = false },
     } });
 
     const foo_bar_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
+        .flags = .{ .has_unknown = false },
     } });
 
     try expect(empty_error_set != foo_bar_baz_set);
@@ -4613,6 +4668,7 @@ test "error union type" {
     const empty_error_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
+        .flags = .{ .has_unknown = false },
     } });
     const bool_type = try ip.get(.{ .simple_type = .bool });
 
@@ -4979,18 +5035,22 @@ test "coerceInMemoryAllowed error set" {
     const foo_bar_baz_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ baz_name, bar_name, foo_name }),
+        .flags = .{ .has_unknown = false },
     } });
     const foo_bar_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ foo_name, bar_name }),
+        .flags = .{ .has_unknown = false },
     } });
     const foo_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{foo_name}),
+        .flags = .{ .has_unknown = false },
     } });
     const empty_set = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = StringSlice.empty,
+        .flags = .{ .has_unknown = false },
     } });
 
     try expect(try ip.coerceInMemoryAllowed(arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
@@ -5277,16 +5337,19 @@ test "resolvePeerTypes error sets" {
     const @"error{foo}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{foo_name}),
+        .flags = .{ .has_unknown = false },
     } });
 
     const @"error{bar}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{bar_name}),
+        .flags = .{ .has_unknown = false },
     } });
 
     const @"error{bar,foo}" = try ip.get(.{ .error_set_type = .{
         .owner_decl = .none,
         .names = try ip.getStringSlice(&.{ bar_name, foo_name }),
+        .flags = .{ .has_unknown = false },
     } });
 
     const @"error{bar}!i32" = try ip.get(.{ .error_union_type = .{
