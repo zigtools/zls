@@ -942,7 +942,7 @@ pub fn loadDirectoryRecursive(store: *DocumentStore, directory_uri: Uri) LoadDir
     defer workspace_dir.close(store.io);
 
     var walker = try workspace_dir.walk(store.allocator);
-    defer walker.deinit();
+    defer walker.deinit(store.io);
 
     const getOrLoadHandleVoid = struct {
         fn getOrLoadHandleVoid(
