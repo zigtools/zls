@@ -35,12 +35,11 @@ jobs:
       - name: Setup wasmtime
         if: matrix.os == 'ubuntu-latest'
         run: |
-          WASMTIME_VERSION=v50.0.1
-          wget https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-musl.tar.xz
-          echo "2ddfcfaf8d859ae84a618d7a52f01c5d0d0fa5ae323bf758fb3a376129de5746  wasmtime-${WASMTIME_VERSION}-x86_64-musl.tar.xz" | sha256sum --check
-          tar -xf wasmtime-${WASMTIME_VERSION}-x86_64-musl.tar.xz --directory wasmtime-${WASMTIME_VERSION}-x86_64-musl/wasmtime
-          echo "${PWD}/wasmtime-${WASMTIME_VERSION}-x86_64-musl/wasmtime" >> $GITHUB_PATH
-          wasmtime --version
+          WASMTIME_VERSION=v50.0.2
+          wget https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz
+          echo "5db0ca8e838ab95a51ba9acdf11f42888bcd0092dda45a86129ae540c4fa952c  wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz" | sha256sum --check
+          tar -xf wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz
+          echo "${PWD}/wasmtime-${WASMTIME_VERSION}-x86_64-linux" >> $GITHUB_PATH
 
       - name: Run zig build check test -Dtarget=wasm32-wasi
         if: matrix.os == 'ubuntu-latest'
