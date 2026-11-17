@@ -564,15 +564,27 @@ pub fn getVariableSignature(
             var members_source: std.ArrayList(u8) = .empty;
 
             for (container_decl.ast.members) |member| {
-                const member_line_start = offsets.lineLocUntilIndex(tree.source, tree.tokenStart(tree.firstToken(member))).start;
-
-                const member_source_indented = switch (tree.nodeTag(member)) {
+                switch (tree.nodeTag(member)) {
                     .container_field_init,
                     .container_field_align,
                     .container_field,
-                    => tree.source[member_line_start..offsets.tokenToLoc(tree, ast.lastToken(tree, member)).end],
+                    => {},
+
                     else => continue,
-                };
+                }
+
+                const first_token = tree.firstToken(member);
+                const first_token_idx = tree.tokenStart(first_token);
+                const line_loc = offsets.lineLocUntilIndex(tree.source, first_token_idx);
+
+                const member_source = offsets.nodeToSlice(tree, member);
+                const member_loc = offsets.nodeToLoc(tree, member);
+
+                const prefix = tree.source[line_loc.start..member_loc.start];
+                const indent = std.mem.findNone(u8, prefix, " \t") orelse prefix.len;
+
+                const member_source_indented = try std.mem.concat(arena, u8, &.{ prefix[0..indent], member_source });
+
                 try members_source.append(arena, '\n');
                 try members_source.appendSlice(arena, try trimCommonIndentation(arena, member_source_indented, 4));
                 try members_source.append(arena, ',');
