@@ -25,7 +25,7 @@ jobs:
       - name: Install kcov
         run: |
           sudo apt-get update
-          sudo apt-get install patchelf
+          sudo apt-get install -y patchelf libdw-dev
           wget https://github.com/SimonKagstrom/kcov/releases/download/v42/kcov-amd64.tar.gz
           echo "78aa17a5f6d27a867cc0540b1550051591d350423a1a0ef98d63c9ce7cc10f9d  kcov-amd64.tar.gz" | sha256sum --check
           sudo tar xf kcov-amd64.tar.gz -C /
