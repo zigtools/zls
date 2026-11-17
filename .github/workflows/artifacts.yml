@@ -9,6 +9,9 @@ on:
   workflow_dispatch:
   # When manually invocing this workflow, keep in mind that ZLS builds can't be modified after they have been published to `releases.zigtools.org/v1/zls/publish`.
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     if: github.repository_owner == 'zigtools'

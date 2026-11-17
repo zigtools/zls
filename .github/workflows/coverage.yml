@@ -6,6 +6,10 @@ on:
       - master
   pull_request:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   coverage:
     if: github.repository_owner == 'zigtools'
