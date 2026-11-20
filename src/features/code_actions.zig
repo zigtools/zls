@@ -119,8 +119,11 @@ pub const Builder = struct {
                     .@"error capture; omit it instead" => {},
                     .@"error capture" => try handleUnusedCapture(builder, loc, &remove_capture_actions),
                 },
-                // the undeclared identifier may be a discard
-                .undeclared_identifier => try handlePointlessDiscard(builder, loc),
+                // the undeclared identifier may be a discard or a function call
+                .undeclared_identifier => {
+                    try handlePointlessDiscard(builder, loc);
+                    try handleGenerateFunctionStub(builder, loc);
+                },
                 .var_never_mutated => try handleVariableNeverMutated(builder, loc),
             }
         }
@@ -621,6 +624,166 @@ fn handleVariableNeverMutated(builder: *Builder, loc: offsets.Loc) error{OutOfMe
             builder.createTextEditLoc(offsets.tokenToLoc(tree, var_token), "const"),
         }),
     });
+}
+
+fn handleGenerateFunctionStub(builder: *Builder, loc: offsets.Loc) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!builder.wantKind(.quickfix)) return;
+
+    const tree = &builder.handle.tree;
+    const identifier_token = offsets.sourceIndexToTokenIndex(tree, loc.start).pickTokenTag(.identifier, tree) orelse return;
+    const identifier_name = offsets.identifierTokenToNameSlice(tree, identifier_token);
+
+    if (identifier_token + 1 >= tree.tokens.len) return;
+    if (tree.tokenTag(identifier_token + 1) != .l_paren) return;
+
+    var paren_depth: usize = 1;
+    var i = identifier_token + 2;
+    var closing_paren: ?usize = null;
+    while (i < tree.tokens.len and paren_depth > 0) : (i += 1) {
+        switch (tree.tokenTag(i)) {
+            .l_paren => paren_depth += 1,
+            .r_paren => {
+                paren_depth -= 1;
+                if (paren_depth == 0) {
+                    closing_paren = i;
+                }
+            },
+            else => {},
+        }
+    }
+
+    if (closing_paren == null) return;
+
+    const arena = builder.arena;
+    var arg_names = std.ArrayList([]const u8).init(arena);
+    defer arg_names.deinit();
+
+    var current_paren_depth: usize = 0;
+    var arg_start: ?usize = null;
+    var arg_count: usize = 0;
+
+    for (identifier_token + 2..closing_paren.?) |j| {
+        const tag = tree.tokenTag(j);
+        switch (tag) {
+            .l_paren, .l_brace, .l_bracket => {
+                if (arg_start == null) arg_start = j;
+                current_paren_depth += 1;
+            },
+            .r_paren, .r_brace, .r_bracket => {
+                current_paren_depth -= 1;
+            },
+            .comma => {
+                if (current_paren_depth == 0) {
+                    if (arg_start) |start| {
+                        const arg_text = offsets.locToSlice(tree.source, .{ .start = tree.tokenStart(start), .end = tree.tokenStart(j) });
+                        try arg_names.append(try extractParamName(arena, arg_text, arg_count));
+                    }
+                    arg_count += 1;
+                    arg_start = null;
+                }
+            },
+            .identifier, .integer_literal, .float_literal, .string_literal => {
+                if (arg_start == null and current_paren_depth == 0) {
+                    arg_start = j;
+                }
+            },
+            else => {},
+        }
+    }
+
+    if (arg_start != null or (identifier_token + 2 < closing_paren.?)) {
+        if (arg_start) |start| {
+            const arg_text = offsets.locToSlice(tree.source, .{ .start = tree.tokenStart(start), .end = tree.tokenStart(closing_paren.?) });
+            try arg_names.append(try extractParamName(arena, arg_text, arg_count));
+        }
+        arg_count += 1;
+    }
+
+    const return_type = try inferReturnType(builder, identifier_token, closing_paren.?);
+
+    var stub = std.ArrayList(u8).init(arena);
+    defer stub.deinit();
+
+    try stub.writer().print("pub fn {s}(", .{identifier_name});
+    for (0..arg_count) |idx| {
+        if (idx > 0) try stub.writer().print(", ", .{});
+        const param_name = if (idx < arg_names.items.len) arg_names.items[idx] else try std.fmt.allocPrint(arena, "arg{d}", .{idx});
+        try stub.writer().print("{s}: anytype", .{param_name});
+    }
+    try stub.writer().print(") {s} {{\n", .{return_type});
+    try stub.writer().print("    @compileError(\"unimplemented\");\n", .{});
+    try stub.writer().print("}}\n", .{});
+
+    const insertion_offset = tree.source.len;
+
+    var final_text = std.ArrayList(u8).init(arena);
+    defer final_text.deinit();
+    try final_text.writer().print("\n\n{s}", .{stub.items});
+
+    try builder.actions.append(builder.arena, .{
+        .title = try std.fmt.allocPrint(arena, "generate function '{s}'", .{identifier_name}),
+        .kind = .quickfix,
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{
+            builder.createTextEditPos(insertion_offset, final_text.items),
+        }),
+    });
+}
+
+fn extractParamName(arena: std.mem.Allocator, arg_text: []const u8, index: usize) error{OutOfMemory}![]const u8 {
+    var trimmed = std.mem.trim(u8, arg_text, " \t\n");
+
+    if (std.mem.allMatch(u8, trimmed, &std.ascii.charset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"))) {
+        if (trimmed.len > 0 and (std.ascii.isAlpha(trimmed[0]) or trimmed[0] == '_')) {
+            return try arena.dupe(u8, trimmed);
+        }
+    }
+
+    return try std.fmt.allocPrint(arena, "arg{d}", .{index});
+}
+
+fn inferReturnType(builder: *Builder, call_token: Ast.TokenIndex, closing_paren_token: Ast.TokenIndex) error{OutOfMemory}![]const u8 {
+    const tree = &builder.handle.tree;
+    const arena = builder.arena;
+
+    if (closing_paren_token + 1 < tree.tokens.len) {
+        const next_token = tree.tokenTag(closing_paren_token + 1);
+
+        if (next_token == .semicolon or next_token == .comma) {
+            if (call_token >= 3) {
+                const maybe_equal = tree.tokenTag(call_token - 1);
+                if (maybe_equal == .equal) {
+                    const name_token = call_token - 2;
+                    const var_const_token = if (name_token > 0) tree.tokenTag(name_token - 1) else .eof;
+
+                    if (var_const_token == .keyword_const or var_const_token == .keyword_var) {
+                        if (var_const_token == .keyword_const and name_token > 2) {
+                            const colon_token = tree.tokenTag(name_token - 1);
+                            if (colon_token == .colon) {
+                                const type_start = name_token;
+                                var type_end = name_token + 1;
+                                while (type_end < call_token and tree.tokenTag(type_end) != .equal) : (type_end += 1) {}
+
+                                if (type_start < type_end) {
+                                    const type_text = offsets.locToSlice(tree.source, .{
+                                        .start = tree.tokenStart(type_start),
+                                        .end = tree.tokenStart(type_end),
+                                    });
+                                    const trimmed = std.mem.trim(u8, type_text, " \t\n");
+                                    return try arena.dupe(u8, trimmed);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return "void";
 }
 
 const ImportPlacement = enum {
