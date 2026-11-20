@@ -1244,6 +1244,128 @@ pub fn resolveBracketAccess(analyser: *Analyser, lhs_binding: Binding, rhs: Brac
     }
 }
 
+pub fn resolveTypeInfoFieldChain(analyser: *Analyser, ty: Type, first_field: []const u8, second_field: []const u8) error{OutOfMemory}!?Type {
+    // Handle chained field access like @typeInfo(T).pointer.child
+    if (!ty.is_type_val) return null;
+
+    switch (ty.data) {
+        .pointer => |info| {
+            if (std.mem.eql(u8, first_field, "pointer")) {
+                if (std.mem.eql(u8, second_field, "child")) {
+                    return try info.elem_ty.instanceTypeVal(analyser);
+                } else if (std.mem.eql(u8, second_field, "size")) {
+                    // Return the size as a type value - would need proper implementation
+                    return null;
+                }
+            }
+        },
+        .array => |info| {
+            if (std.mem.eql(u8, first_field, "array")) {
+                if (std.mem.eql(u8, second_field, "child")) {
+                    return try info.elem_ty.instanceTypeVal(analyser);
+                } else if (std.mem.eql(u8, second_field, "len")) {
+                    // Return length as a type value - this is trickier
+                    if (info.elem_count) |count| {
+                        const index = try analyser.ip.get(.{
+                            .int_u64_value = .{ .ty = .usize_type, .int = count }
+                        });
+                        return Type.fromIP(analyser, .usize_type, index);
+                    }
+                    return Type.fromIP(analyser, .usize_type, null);
+                }
+            }
+        },
+        .ip_index => |payload| {
+            switch (analyser.ip.indexToKey(payload.type)) {
+                .pointer_type => |ptr_info| {
+                    if (std.mem.eql(u8, first_field, "pointer")) {
+                        if (std.mem.eql(u8, second_field, "child")) {
+                            return Type.fromIP(analyser, ptr_info.elem_type, null);
+                        }
+                    }
+                },
+                .array_type => |array_info| {
+                    if (std.mem.eql(u8, first_field, "array")) {
+                        if (std.mem.eql(u8, second_field, "child")) {
+                            return Type.fromIP(analyser, array_info.child, null);
+                        } else if (std.mem.eql(u8, second_field, "len")) {
+                            const index = try analyser.ip.get(.{
+                                .int_u64_value = .{ .ty = .usize_type, .int = array_info.len }
+                            });
+                            return Type.fromIP(analyser, .usize_type, index);
+                        }
+                    }
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
+
+    return null;
+}
+
+pub fn resolveTypeInfoField(analyser: *Analyser, ty: Type, field_name: []const u8) error{OutOfMemory}!?Type {
+    if (!ty.is_type_val) return null;
+
+    // Handle field access on @typeInfo(T) results
+    // @typeInfo returns std.builtin.Type union, we need to extract the requested field
+    switch (ty.data) {
+        .pointer => |info| {
+            if (std.mem.eql(u8, field_name, "pointer")) {
+                // Create a marker type for Type.Pointer - this will be used for accessing .child, etc.
+                return .{ .data = .{ .pointer = .{
+                    .elem_ty = info.elem_ty,
+                    .sentinel = info.sentinel,
+                    .flags = info.flags,
+                } }, .is_type_val = true };
+            }
+        },
+        .array => |info| {
+            if (std.mem.eql(u8, field_name, "array")) {
+                // Create a marker type for Type.Array
+                return .{ .data = .{ .array = .{
+                    .elem_count = info.elem_count,
+                    .sentinel = info.sentinel,
+                    .elem_ty = info.elem_ty,
+                } }, .is_type_val = true };
+            }
+        },
+        .optional => |child_ty| {
+            if (std.mem.eql(u8, field_name, "optional")) {
+                // Create a marker type for Type.Optional
+                return .{ .data = .{ .optional = child_ty }, .is_type_val = true };
+            }
+        },
+        .ip_index => |payload| {
+            switch (analyser.ip.indexToKey(payload.type)) {
+                .pointer_type => |ptr_info| {
+                    if (std.mem.eql(u8, field_name, "pointer")) {
+                        // Return the pointer info wrapped - this allows further field access like .child
+                        return Type.fromIP(analyser, payload.type, null);
+                    }
+                },
+                .array_type => |array_info| {
+                    if (std.mem.eql(u8, field_name, "array")) {
+                        // Return array info wrapped
+                        return Type.fromIP(analyser, payload.type, null);
+                    }
+                },
+                .optional_type => |opt_info| {
+                    if (std.mem.eql(u8, field_name, "optional")) {
+                        // Return optional info wrapped
+                        return Type.fromIP(analyser, payload.type, null);
+                    }
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
+
+    return null;
+}
+
 pub fn resolvePropertyType(analyser: *Analyser, ty: Type, name: []const u8) error{OutOfMemory}!?Type {
     if (ty.is_type_val)
         return null;
@@ -2322,6 +2444,14 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
 
             const call_name = tree.tokenSlice(tree.nodeMainToken(node));
 
+            // Handle @typeInfo specially since it's not in the BuiltinFn list
+            if (std.mem.eql(u8, call_name, "@typeInfo")) {
+                if (params.len < 1) return null;
+                const arg_type = (try analyser.resolveTypeOfNodeInternal(.of(params[0], handle))) orelse return null;
+                // @typeInfo returns std.builtin.Type which we represent as a type value
+                return try analyser.instanceStdBuiltinType("Type") orelse .unknown_type;
+            }
+
             const item = std.zig.BuiltinFn.list.get(call_name) orelse return null;
             switch (item.tag) {
                 .This => {
@@ -3110,10 +3240,50 @@ fn resolveBindingOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Er
 
         .field_access => {
             const lhs_node, const field_name = tree.nodeData(node_handle.node).node_and_token;
+            const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
+
+            // Special handling for chained field access on @typeInfo, e.g., @typeInfo(T).pointer.child
+            if (tree.nodeTag(lhs_node) == .field_access) {
+                const inner_lhs_node, const inner_field_name = tree.nodeData(lhs_node).node_and_token;
+                const inner_symbol = offsets.identifierTokenToNameSlice(tree, inner_field_name);
+
+                // Check if the base is a @typeInfo call
+                if (tree.nodeTag(inner_lhs_node) == .builtin_call or tree.nodeTag(inner_lhs_node) == .builtin_call_comma or
+                    tree.nodeTag(inner_lhs_node) == .builtin_call_two or tree.nodeTag(inner_lhs_node) == .builtin_call_two_comma) {
+                    var buffer: [2]Ast.Node.Index = undefined;
+                    const params = tree.builtinCallParams(&buffer, inner_lhs_node);
+                    if (params) |p| {
+                        const call_name = tree.tokenSlice(tree.nodeMainToken(inner_lhs_node));
+                        if (std.mem.eql(u8, call_name, "@typeInfo") and p.len > 0) {
+                            const arg_type = (try analyser.resolveTypeOfNodeInternal(.of(p[0], handle))) orelse return null;
+                            if (arg_type.is_type_val) {
+                                if (try analyser.resolveTypeInfoFieldChain(arg_type, inner_symbol, symbol)) |field_type| {
+                                    return .{ .type = field_type, .is_const = true };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also handle direct field access on @typeInfo
+            if (tree.nodeTag(lhs_node) == .builtin_call or tree.nodeTag(lhs_node) == .builtin_call_comma or tree.nodeTag(lhs_node) == .builtin_call_two or tree.nodeTag(lhs_node) == .builtin_call_two_comma) {
+                var buffer: [2]Ast.Node.Index = undefined;
+                const params = tree.builtinCallParams(&buffer, lhs_node);
+                if (params) |p| {
+                    const call_name = tree.tokenSlice(tree.nodeMainToken(lhs_node));
+                    if (std.mem.eql(u8, call_name, "@typeInfo") and p.len > 0) {
+                        const arg_type = (try analyser.resolveTypeOfNodeInternal(.of(p[0], handle))) orelse return null;
+                        if (arg_type.is_type_val) {
+                            if (try analyser.resolveTypeInfoField(arg_type, symbol)) |field_type| {
+                                return .{ .type = field_type, .is_const = true };
+                            }
+                        }
+                    }
+                }
+            }
 
             const lhs = (try analyser.resolveBindingOfNodeInternal(.of(lhs_node, handle))) orelse return null;
-
-            const symbol = offsets.identifierTokenToNameSlice(tree, field_name);
 
             return try analyser.resolveFieldAccessBinding(lhs, symbol);
         },
