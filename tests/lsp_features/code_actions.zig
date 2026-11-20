@@ -976,6 +976,126 @@ test "convert string literal to multiline - invalid" {
     );
 }
 
+test "generate function stub with simple args" {
+    try testGenerateFunctionStub(
+        \\test {
+        \\    myFunction<|>(42, "hello");
+        \\}
+        \\
+    ,
+        \\test {
+        \\    myFunction(42, "hello");
+        \\}
+        \\
+        \\pub fn myFunction(arg0: anytype, arg1: anytype) void {
+        \\    @compileError("unimplemented");
+        \\}
+        \\
+    );
+}
+
+test "generate function stub with variable args" {
+    try testGenerateFunctionStub(
+        \\test {
+        \\    const result = compute<|>(list, count);
+        \\}
+        \\
+    ,
+        \\test {
+        \\    const result = compute(list, count);
+        \\}
+        \\
+        \\pub fn compute(list: anytype, count: anytype) void {
+        \\    @compileError("unimplemented");
+        \\}
+        \\
+    );
+}
+
+test "generate function stub with typed return" {
+    try testGenerateFunctionStub(
+        \\test {
+        \\    const data: []u8 = process<|>(input);
+        \\}
+        \\
+    ,
+        \\test {
+        \\    const data: []u8 = process(input);
+        \\}
+        \\
+        \\pub fn process(input: anytype) []u8 {
+        \\    @compileError("unimplemented");
+        \\}
+        \\
+    );
+}
+
+fn testGenerateFunctionStub(before: []const u8, after: []const u8) !void {
+    var ctx: Context = try .init();
+    defer ctx.deinit();
+
+    var phr = try helper.collectClearPlaceholders(allocator, before);
+    defer phr.deinit(allocator);
+    const placeholders = phr.locations.items(.new);
+    const source = phr.new_source;
+
+    const range: types.Range = switch (placeholders.len) {
+        0 => .{
+            .start = .{ .line = 0, .character = 0 },
+            .end = offsets.indexToPosition(before, before.len, ctx.server.offset_encoding),
+        },
+        1 => blk: {
+            const point = offsets.indexToPosition(before, placeholders[0].start, ctx.server.offset_encoding);
+            break :blk .{ .start = point, .end = point };
+        },
+        else => unreachable,
+    };
+
+    const uri = try ctx.addDocument(.{ .source = source });
+    const handle = ctx.server.document_store.getHandle(uri).?;
+
+    const params: types.CodeAction.Params = .{
+        .textDocument = .{ .uri = uri.raw },
+        .range = range,
+        .context = .{
+            .diagnostics = &.{},
+            .only = &.{.quickfix},
+        },
+    };
+
+    @setEvalBranchQuota(5000);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse return;
+
+    for (response) |action_result| {
+        const action = action_result.code_action;
+        if (action.edit) |edit| {
+            if (edit.changes) |changes_map| {
+                for (changes_map.values()) |text_edits| {
+                    for (text_edits) |text_edit| {
+                        // Apply the edit
+                        var result_source = try allocator.alloc(u8, source.len + text_edit.newText.len);
+                        defer allocator.free(result_source);
+
+                        const loc = offsets.rangeToLoc(source, text_edit.range, ctx.server.offset_encoding);
+                        std.mem.copyForwards(u8, result_source[0..loc.start], source[0..loc.start]);
+                        std.mem.copyForwards(u8, result_source[loc.start..][0..text_edit.newText.len], text_edit.newText);
+                        std.mem.copyForwards(u8, result_source[loc.start + text_edit.newText.len ..], source[loc.end..]);
+
+                        if (std.mem.eql(u8, result_source, after)) {
+                            return; // Test passed
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    std.debug.print("No matching code action found\n", .{});
+    std.debug.print("Expected:\n{s}\n", .{after});
+    std.debug.print("Source:\n{s}\n", .{source});
+    return error.TestFailed;
+}
+
 fn testAutofix(before: []const u8, after: []const u8) !void {
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = true }); // diagnostics come from std.zig.AstGen
     try testDiagnostic(before, after, .{ .filter_kind = .@"source.fixAll", .want_zir = false }); // diagnostics come from calling zig ast-check
