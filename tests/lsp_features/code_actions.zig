@@ -1052,37 +1052,42 @@ fn testGenerateFunctionStub(before: []const u8, after: []const u8) !void {
     };
 
     const uri = try ctx.addDocument(.{ .source = source });
-    const handle = ctx.server.document_store.getHandle(uri).?;
 
     const params: types.CodeAction.Params = .{
         .textDocument = .{ .uri = uri.raw },
         .range = range,
         .context = .{
             .diagnostics = &.{},
-            .only = &.{.quickfix},
         },
     };
 
     @setEvalBranchQuota(5000);
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse return;
 
+    if (response.len == 0) {
+        std.debug.print("No code actions generated\n", .{});
+        return error.NoCodeAction;
+    }
+
     for (response) |action_result| {
         const action = action_result.code_action;
-        if (action.edit) |edit| {
-            if (edit.changes) |changes_map| {
-                for (changes_map.values()) |text_edits| {
-                    for (text_edits) |text_edit| {
-                        // Apply the edit
-                        var result_source = try allocator.alloc(u8, source.len + text_edit.newText.len);
-                        defer allocator.free(result_source);
+        if (std.mem.containsAtLeast(u8, action.title, 1, "generate function")) {
+            if (action.edit) |edit| {
+                if (edit.changes) |changes_map| {
+                    if (changes_map.map.get(uri.raw)) |text_edits| {
+                        var result = try ctx.arena.allocator().alloc(u8, source.len + 500);
+                        std.mem.copyForwards(u8, result[0..source.len], source);
 
-                        const loc = offsets.rangeToLoc(source, text_edit.range, ctx.server.offset_encoding);
-                        std.mem.copyForwards(u8, result_source[0..loc.start], source[0..loc.start]);
-                        std.mem.copyForwards(u8, result_source[loc.start..][0..text_edit.newText.len], text_edit.newText);
-                        std.mem.copyForwards(u8, result_source[loc.start + text_edit.newText.len ..], source[loc.end..]);
+                        for (text_edits) |text_edit| {
+                            const loc = offsets.rangeToLoc(source, text_edit.range, ctx.server.offset_encoding);
+                            if (loc.start == source.len) {
+                                std.mem.copyForwards(u8, result[source.len..], text_edit.newText);
+                                result.len = source.len + text_edit.newText.len;
 
-                        if (std.mem.eql(u8, result_source, after)) {
-                            return; // Test passed
+                                if (std.mem.eql(u8, result[0..result.len], after)) {
+                                    return; // Test passed
+                                }
+                            }
                         }
                     }
                 }
@@ -1090,9 +1095,8 @@ fn testGenerateFunctionStub(before: []const u8, after: []const u8) !void {
         }
     }
 
-    std.debug.print("No matching code action found\n", .{});
+    std.debug.print("No matching code action for 'generate function'\n", .{});
     std.debug.print("Expected:\n{s}\n", .{after});
-    std.debug.print("Source:\n{s}\n", .{source});
     return error.TestFailed;
 }
 
