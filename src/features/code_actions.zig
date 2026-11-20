@@ -734,10 +734,17 @@ fn handleGenerateFunctionStub(builder: *Builder, loc: offsets.Loc) error{OutOfMe
 }
 
 fn extractParamName(arena: std.mem.Allocator, arg_text: []const u8, index: usize) error{OutOfMemory}![]const u8 {
-    var trimmed = std.mem.trim(u8, arg_text, " \t\n");
+    const trimmed = std.mem.trim(u8, arg_text, " \t\n");
 
-    if (std.mem.allMatch(u8, trimmed, &std.ascii.charset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"))) {
-        if (trimmed.len > 0 and (std.ascii.isAlpha(trimmed[0]) or trimmed[0] == '_')) {
+    if (trimmed.len > 0 and (std.ascii.isAlpha(trimmed[0]) or trimmed[0] == '_')) {
+        var is_valid = true;
+        for (trimmed) |c| {
+            if (!std.ascii.isAlphanumeric(c) and c != '_') {
+                is_valid = false;
+                break;
+            }
+        }
+        if (is_valid) {
             return try arena.dupe(u8, trimmed);
         }
     }
