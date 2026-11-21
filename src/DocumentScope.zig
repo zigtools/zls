@@ -664,7 +664,7 @@ fn walkNode(
         .mul_sat,
         .add,
         .sub,
-        .array_cat,
+        .cat,
         .add_wrap,
         .sub_wrap,
         .add_sat,
