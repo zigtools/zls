@@ -34,7 +34,7 @@ pub const top_level: []const Item = &.{
 
 pub const keywords: std.EnumMap(std.zig.Token.Tag, []const u8) = .init(.{
     .keyword_callconv = "callconv($0)",
-    .keyword_enum = "enum {$0}",
+    .keyword_enum = "enum {$0};",
     .keyword_fn = "fn ${1:name}($2) ${3:!void} {$0}",
     .keyword_for = "for ($1) |${2:value}| {$0}",
     .keyword_if = "if ($1) {$0}",
