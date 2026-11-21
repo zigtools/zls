@@ -2971,7 +2971,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
             return lhs_ty.withoutIPIndex(analyser);
         },
 
-        .array_cat => {
+        .cat => {
             const l_elem_idx, const r_elem_idx = tree.nodeData(node).node_and_node;
 
             var l_elem_ty = try analyser.resolveTypeOfNodeInternal(.of(l_elem_idx, handle)) orelse return null;
