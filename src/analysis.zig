@@ -2652,40 +2652,78 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, options: ResolveOptions) Error
         => {
             const loop: struct {
                 label_token: ?Ast.TokenIndex,
+                while_cond: ?Ast.Node.Index,
                 then_expr: Ast.Node.Index,
                 else_expr: Ast.Node.OptionalIndex,
             } = if (ast.fullWhile(tree, node)) |while_node|
                 .{
                     .label_token = while_node.label_token,
+                    .while_cond = while_node.ast.cond_expr,
                     .then_expr = while_node.ast.then_expr,
                     .else_expr = while_node.ast.else_expr,
                 }
             else if (ast.fullFor(tree, node)) |for_node|
                 .{
                     .label_token = for_node.label_token,
+                    .while_cond = null,
                     .then_expr = for_node.ast.then_expr,
                     .else_expr = for_node.ast.else_expr,
                 }
             else
                 unreachable;
 
-            const else_expr = loop.else_expr.unwrap() orelse return null;
+            var either: std.ArrayList(Type.TypeWithDescriptor) = .empty;
 
-            // TODO: peer type resolution based on `else` and all `break` statements
-            if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |else_type|
-                return else_type.withoutIPIndex(analyser);
-
-            var it: BreakIterator = .{
-                .walker = try .init(analyser.gpa, tree, loop.then_expr),
-                .label = if (loop.label_token) |token| offsets.identifierTokenToNameSlice(tree, token) else null,
-                .allow_unlabeled = true,
-            };
-            defer it.walker.deinit(analyser.gpa);
-
-            while (try it.next(analyser.gpa, tree)) |operand| {
-                if (try analyser.resolveTypeOfNodeInternal(.of(operand, handle))) |operand_type|
-                    return operand_type;
+            if (loop.else_expr.unwrap()) |else_expr| {
+                if (try analyser.resolveTypeOfNodeInternal(.of(else_expr, handle))) |else_type| {
+                    try either.append(analyser.arena, .{
+                        .type = else_type.withoutIPIndex(analyser),
+                        .descriptor = "else",
+                    });
+                }
+            } else {
+                // Without `else`, normal completion yields `void`.
+                // A `while` loop with condition `true` cannot complete normally.
+                const cond_is_true = if (loop.while_cond) |cond_expr| blk: {
+                    const ty = try analyser.resolveTypeOfNodeInternal(.of(cond_expr, handle)) orelse break :blk false;
+                    break :blk ty.ipIndex() == .bool_true;
+                } else false;
+                if (!cond_is_true) {
+                    try either.append(analyser.arena, .{
+                        .type = Type.fromIP(analyser, .void_type, .void_value),
+                        .descriptor = "completion",
+                    });
+                }
             }
+
+            // A `BreakIterator` without label is always needed: even if the loop has a label it can
+            // be targeted by an unlabeled break.
+            var label_buffer: [2]?[]const u8 = undefined;
+            var labels: std.ArrayList(?[]const u8) = .initBuffer(&label_buffer);
+            labels.appendAssumeCapacity(null);
+            if (loop.label_token) |token| {
+                labels.appendAssumeCapacity(offsets.identifierTokenToNameSlice(tree, token));
+            }
+
+            for (labels.items) |label| {
+                var it: BreakIterator = .{
+                    .walker = try .init(analyser.gpa, tree, loop.then_expr),
+                    .label = label,
+                    .allow_unlabeled = label == null,
+                };
+                defer it.walker.deinit(analyser.gpa);
+
+                while (try it.next(analyser.gpa, tree)) |operand| {
+                    if (try analyser.resolveTypeOfNodeInternal(.of(operand, handle))) |operand_type| {
+                        try either.append(analyser.arena, .{
+                            .type = operand_type.withoutIPIndex(analyser),
+                            .descriptor = "break",
+                        });
+                    }
+                }
+            }
+
+            return Type.fromEither(analyser, either.items);
         },
         .block,
         .block_semicolon,
