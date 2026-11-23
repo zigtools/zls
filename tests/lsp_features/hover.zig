@@ -615,6 +615,25 @@ test "enum" {
         \\(type)
         \\```
     );
+
+    try testHover(
+        \\pub const M<cursor>yEnum = enum {
+        \\    // zig fmt: off
+        \\    foo, bar, baz
+        \\    // zig fmt: on
+        \\};
+    ,
+        \\```zig
+        \\const MyEnum = enum {
+        \\    foo,
+        \\    bar,
+        \\    baz,
+        \\}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
 }
 
 test "union" {
@@ -643,6 +662,29 @@ test "union" {
         \\      func_src: LazySrcLoc,
         \\      return_ty: Type,
         \\  },
+        \\}
+        \\```
+        \\```zig
+        \\(type)
+        \\```
+    );
+
+    try testHover(
+        \\pub const M<cursor>yUnion = union(enum) {
+        \\    // zig fmt: off
+        \\    foo, bar: u16, baz: struct {
+        \\        bam: u8
+        \\    }
+        \\    // zig fmt: on
+        \\};
+    ,
+        \\```zig
+        \\const MyUnion = union(enum) {
+        \\    foo,
+        \\    bar: u16,
+        \\    baz: struct {
+        \\        bam: u8
+        \\    },
         \\}
         \\```
         \\```zig
