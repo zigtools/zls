@@ -325,6 +325,30 @@ test "function alias" {
             .detail = "u32",
         },
     });
+    try testCompletion(
+        \\const S = struct {
+        \\    fn foo(_: S, _: enum{ alpha, beta }) void {}
+        \\    const bar = foo;
+        \\};
+        \\const s: S = undefined;
+        \\const baz = s.bar(.<cursor>);
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const other_cont = struct {
+        \\    fn testFn(_: Test, _: enum { alpha, beta }) void {}
+        \\};
+        \\const Test = struct {
+        \\    pub const testFn = other_cont.testFn;
+        \\};
+        \\const idk: Test = undefined;
+        \\idk.testFn(.<cursor>);
+    , &.{
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
+    });
 }
 
 test "generic function" {
