@@ -773,18 +773,19 @@ pub fn resolveFieldAccessBinding(analyser: *Analyser, lhs_binding: Binding, fiel
         return .{ .type = t, .is_const = true };
 
     // If we are accessing a pointer type, remove one pointerness level :)
-    const left_type = (try analyser.resolveDerefType(lhs)) orelse lhs;
+    const left_binding = (try analyser.resolveDerefBinding(lhs)) orelse lhs_binding;
+    const left_type = left_binding.type;
 
     if (try analyser.resolvePropertyType(left_type, field_name)) |t|
         return .{
             .type = t,
-            .is_const = lhs_binding.is_const,
+            .is_const = left_binding.is_const,
         };
 
     if (try left_type.lookupSymbol(analyser, field_name)) |child|
         return .{
             .type = try child.resolveType(analyser) orelse return null,
-            .is_const = if (left_type.is_type_val) child.isConst() else lhs_binding.is_const,
+            .is_const = if (left_type.is_type_val) child.isConst() else left_binding.is_const,
         };
 
     return null;
