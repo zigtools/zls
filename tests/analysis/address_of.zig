@@ -113,6 +113,17 @@ const some_field_pointer = &some_struct.foo;
 const mutable_field_pointer = &mutable_struct.foo;
 //    ^^^^^^^^^^^^^^^^^^^^^ (*i32)()
 
+const some_struct_pointer_field_pointer = &some_struct_pointer.foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const i32)()
+
+const mutable_struct_pointer_field_pointer = &mutable_struct_pointer.foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*i32)()
+
+var var_some_struct_pointer: *const StructType = &some_struct;
+
+const var_some_struct_pointer_field_pointer = &var_some_struct_pointer.foo;
+//    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ (*const i32)()
+
 const struct_field_pointer = &StructType.foo;
 //    ^^^^^^^^^^^^^^^^^^^^ (unknown)()
 
