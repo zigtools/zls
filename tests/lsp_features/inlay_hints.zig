@@ -284,6 +284,12 @@ test "var decl" {
         \\ var a<struct {...}> = thing(10, -4);
         \\ _ = a;
     , .{ .kind = .Type });
+    try testInlayHints(
+        \\ const bar: struct { u8 } = .{ <u8>255}; 
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\ const foo: struct { u32, []const u8 } = .{ <u32>3, <[]const u8>"" };
+    , .{ .kind = .Type });
 }
 
 test "comptime return types" {
@@ -330,12 +336,12 @@ test "assign destructure" {
     , .{ .kind = .Type });
     try testInlayHints(
         \\test {
-        \\    const foo: comptime_int, const bar<u64> = .{1, @as(u64, 7)};
+        \\    const foo: comptime_int, const bar<u64> = .{<comptime_int>1, @as(u64, 7)};
         \\}
     , .{ .kind = .Type });
     try testInlayHints(
         \\test {
-        \\    const foo<u32>, const bar: u64, var baz<u32> = [_]u32{1, 2, 3};
+        \\    const foo<u32>, const bar: u64, var baz<u32> = [_]u32{1, <u64>2, 3};
         \\}
     , .{ .kind = .Type });
     try testInlayHints(
@@ -343,6 +349,11 @@ test "assign destructure" {
         \\    var foo: u32 = undefined;
         \\    var bar: u64 = undefined;
         \\    foo, bar = .{ 3, 4 };
+        \\}
+    , .{ .kind = .Type });
+    try testInlayHints(
+        \\test {
+        \\ const gamma: u32, const delta: []const u8 = .{ <u32>3, <[]const u8>"" };
         \\}
     , .{ .kind = .Type });
 }
@@ -577,7 +588,7 @@ test "tuple fields" {
     , .{ .kind = .Type });
     try testInlayHints(
         \\fn foo() void {
-        \\    const tmp: struct { i64, f32 } = .{ 1, 0 };
+        \\    const tmp: struct { i64, f32 } = .{ <i64>1, <f32>0 };
         \\    const x<i64> = tmp.@"0";
         \\    const y<f32> = tmp.@"1";
         \\}
