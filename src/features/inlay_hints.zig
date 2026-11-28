@@ -608,6 +608,84 @@ fn writeNodeInlayHint(
                 );
             }
         },
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init,
+        .array_init_comma,
+        => {
+            if (!builder.config.inlay_hints_show_struct_literal_field_type) return; // To Be Reviewed (Do we add dedicated config for array_init?)
+            var buffer: [2]Ast.Node.Index = undefined;
+            const array_init = tree.fullArrayInit(&buffer, node).?;
+            if (array_init.ast.elements.len == 0) return;
+            const source_index = builder.handle.tree.tokenStart(array_init.ast.lbrace) + 1;
+            const ancestors = try ast.nodesOverlappingIndex(builder.analyser.arena, &builder.handle.tree, source_index);
+            if (ancestors.len == 0) return;
+            const tf: AggregatedTypeFilter, const ancestor: Ast.Node.Index = getAggregatedTypeDirectParent(ancestors, tree);
+            switch (tf) {
+                .VarDecl => {
+                    const var_decl = if (tree.fullVarDecl(ancestor)) |v| v else return;
+                    const type_node = if (var_decl.ast.type_node.unwrap()) |v| v else return;
+                    var buf: [2]Ast.Node.Index = undefined;
+                    const containerDecl = if (tree.fullContainerDecl(&buf, type_node)) |v| v else return;
+                    const members = containerDecl.ast.members;
+                    for (array_init.ast.elements, 0..) |value_node, i| {
+                        const first_token = tree.firstToken(value_node);
+                        const type_string = try typeStrOfNode(builder, members[i]) orelse continue;
+
+                        if (type_string.len == 0) continue;
+                        try builder.appendStringHint(
+                            first_token,
+                            type_string,
+                            .prefix,
+                        );
+                    }
+                },
+                .AssignDestructure => {
+                    const assign_destruc = tree.assignDestructure(ancestor);
+                    const ast_variables = assign_destruc.ast.variables;
+
+                    for (array_init.ast.elements, 0..) |value_node, i| {
+                        const first_token = tree.firstToken(value_node);
+                        const varDecl = if (tree.fullVarDecl(ast_variables[i])) |v| v else continue;
+                        if (varDecl.ast.type_node == Ast.Node.OptionalIndex.none) continue; // This case is already took care by .assign_destructure branch
+
+                        const type_string = try typeStrOfNode(builder, ast_variables[i]) orelse continue;
+                        if (type_string.len == 0) continue;
+                        try builder.appendStringHint(
+                            first_token,
+                            type_string,
+                            .prefix,
+                        );
+                    }
+                },
+                .None => {},
+            }
+        },
         else => {},
     }
+}
+
+const AggregatedTypeFilter = enum { VarDecl, AssignDestructure, None };
+
+fn getAggregatedTypeDirectParent(ancestors: []Ast.Node.Index, tree: *const Ast) struct { AggregatedTypeFilter, Ast.Node.Index } {
+    for (ancestors[1..]) |ancestor| {
+        switch (tree.nodeTag(ancestor)) {
+            .local_var_decl,
+            .simple_var_decl,
+            .global_var_decl,
+            .aligned_var_decl,
+            => {
+                return .{ AggregatedTypeFilter.VarDecl, ancestor };
+            },
+            .assign_destructure => {
+                return .{ AggregatedTypeFilter.AssignDestructure, ancestor };
+            },
+            else => {},
+        }
+    }
+    return .{ AggregatedTypeFilter.None, .root };
 }
